@@ -117,7 +117,7 @@ class MedicalComplexSeeder extends Seeder
         ]);
 
         // Patients
-        $p1 = DB::table('patients')->insertGetId(['patient_code' => 'PAT-1001', 'name' => 'حيدر عبد الرضا', 'gender' => 'male', 'age' => 45, 'phone' => '07801112233', 'medical_history' => 'ضغط دم مرتفع، حساسية من البنسلين', 'created_at' => now(), 'updated_at' => now()]);
+        $p1 = DB::table('patients')->insertGetId(['patient_code' => 'PAT-1001', 'name' => 'حيدر عبد الرضا', 'search_name' => \App\Support\ArabicText::normalize('حيدر عبد الرضا'), 'gender' => 'male', 'age' => 45, 'phone' => '07801112233', 'medical_history' => 'ضغط دم مرتفع، حساسية من البنسلين', 'created_at' => now(), 'updated_at' => now()]);
         
         // Visits
         $v1 = DB::table('visits')->insertGetId(['patient_id' => $p1, 'doctor_id' => $doctor1Id, 'visit_date' => Carbon::today(), 'diagnosis' => 'ارتفاع بالضغط الشرياني واضطراب معدل ضربات القلب', 'notes' => 'يحتاج إجراء تخطيط قلب وفحص دم شامل', 'fee' => 25000, 'status' => 'in_consultation', 'created_at' => now(), 'updated_at' => now()]);
