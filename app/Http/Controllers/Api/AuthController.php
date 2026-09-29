@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Google\Client as GoogleClient;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends ApiController
 {
@@ -16,6 +17,20 @@ class AuthController extends ApiController
      * Accepts either an ID token (credential) or an access_token.
      */
     public function googleLogin(Request $request)
+    {
+        try {
+            return $this->handleGoogleLogin($request);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // لا نعيد 500 صامتاً: نسجل السبب ونعيده للواجهة لتسهيل معرفة المشكلة
+            Log::error('Google login failed', ['exception' => $e]);
+
+            return $this->error('فشل تسجيل الدخول عبر Google: ' . $e->getMessage(), 500);
+        }
+    }
+
+    private function handleGoogleLogin(Request $request)
     {
         $request->validate([
             'token'        => 'nullable|string',
@@ -33,8 +48,13 @@ class AuthController extends ApiController
 
         // ─── Path A: ID Token (credential) ─────────────────────────────────
         if ($request->filled('token')) {
+            $clientId = config('services.google.client_id');
+            if (!$clientId) {
+                return $this->error('لم يتم ضبط GOOGLE_CLIENT_ID في ملف .env الخاص بالباك إند', 500);
+            }
+
             try {
-                $client = new GoogleClient(['client_id' => env('GOOGLE_CLIENT_ID')]);
+                $client = new GoogleClient(['client_id' => $clientId]);
                 $payload = $client->verifyIdToken($request->token);
 
                 if (!$payload) {
@@ -45,15 +65,20 @@ class AuthController extends ApiController
                 $name     = $payload['name'] ?? 'مستخدم Google';
                 $googleId = $payload['sub'];
                 $avatar   = $payload['picture'] ?? null;
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 return $this->error('فشل التحقق من التوكن: ' . $e->getMessage(), 401);
             }
         }
         // ─── Path B: Access Token → Fetch user info directly from Google ───
         elseif ($request->filled('access_token')) {
             // جلب بيانات المستخدم مباشرة من جوجل باستخدام الـ access_token
-            $userInfoResponse = Http::withToken($request->access_token)
-                ->get('https://www.googleapis.com/oauth2/v3/userinfo');
+            try {
+                $userInfoResponse = Http::withToken($request->access_token)
+                    ->timeout(15)
+                    ->get('https://www.googleapis.com/oauth2/v3/userinfo');
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                return $this->error('تعذر الاتصال بخوادم Google من السيرفر (تحقق من الإنترنت أو شهادة SSL في PHP): ' . $e->getMessage(), 502);
+            }
 
             if ($userInfoResponse->failed()) {
                 return $this->error('توكن Google غير صالح أو انتهت صلاحيته', 401);

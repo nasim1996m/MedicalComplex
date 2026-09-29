@@ -14,9 +14,9 @@ class LabController extends ApiController
     {
         $requests = DB::table('lab_requests')
             ->join('patients', 'lab_requests.patient_id', '=', 'patients.id')
-            ->join('lab_test_types', 'lab_requests.test_type_id', '=', 'lab_test_types.id')
+            ->leftJoin('lab_test_types', 'lab_requests.test_type_id', '=', 'lab_test_types.id')
             ->join('users as doctors', 'lab_requests.doctor_id', '=', 'doctors.id')
-            ->select('lab_requests.*', 'patients.name as patient_name', 'patients.patient_code', 'patients.age', 'lab_test_types.name as test_name', 'lab_test_types.category as test_category', 'lab_test_types.price as test_price', 'doctors.name as doctor_name')
+            ->select('lab_requests.*', 'patients.name as patient_name', 'patients.patient_code', 'patients.age', DB::raw('COALESCE(lab_test_types.name, lab_requests.test_name) as test_name'), 'lab_test_types.category as test_category', 'lab_test_types.price as test_price', 'doctors.name as doctor_name')
             ->orderBy('lab_requests.created_at', 'desc')
             ->get();
 
@@ -46,7 +46,9 @@ class LabController extends ApiController
             return $this->error('طلب الفحص غير موجود', 404);
         }
 
-        $testType = DB::table('lab_test_types')->where('id', $labReq->test_type_id)->first();
+        $testType = $labReq->test_type_id
+            ? DB::table('lab_test_types')->where('id', $labReq->test_type_id)->first()
+            : null;
 
         DB::table('lab_requests')->where('id', $id)->update([
             'status' => 'completed',
@@ -61,7 +63,7 @@ class LabController extends ApiController
             'voucher_type' => 'income',
             'category' => 'lab_income',
             'amount' => $testType->price ?? 15000,
-            'description' => 'إيراد فحص مختبر/أشعة (' . ($testType->name ?? 'فحص') . ')',
+            'description' => 'إيراد فحص مختبر/أشعة (' . ($testType->name ?? $labReq->test_name ?? 'فحص') . ')',
             'created_by' => $request->performed_by,
             'status' => 'approved',
             'created_at' => now(),

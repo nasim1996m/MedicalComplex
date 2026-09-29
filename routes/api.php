@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\DoctorController;
+use App\Http\Controllers\Api\PatientController;
 use App\Http\Controllers\Api\PharmacyController;
 use App\Http\Controllers\Api\LabController;
 use App\Http\Controllers\Api\InventoryController;
@@ -26,9 +27,15 @@ Route::prefix('v1')->group(function () {
     Route::get('/admin/stats', [AdminController::class, 'dashboardStats']);
     Route::post('/admin/role-requests/{id}', [AdminController::class, 'approveRoleRequest']);
 
+    // Shared Patient Records (all doctors, lab & pharmacy)
+    Route::get('/patients', [PatientController::class, 'index']);
+    Route::post('/patients', [PatientController::class, 'store']);
+    Route::get('/patients/{id}/history', [PatientController::class, 'history']);
+
     // Doctor Routes
     Route::get('/doctor/dashboard', [DoctorController::class, 'dashboard']);
     Route::post('/doctor/visits', [DoctorController::class, 'createVisit']);
+    Route::post('/doctor/consultations', [DoctorController::class, 'saveConsultation']);
     Route::post('/doctor/lab-requests', [DoctorController::class, 'requestLabTest']);
     Route::post('/doctor/prescriptions', [DoctorController::class, 'sendPrescription']);
     Route::get('/doctor/patients/{id}/history', [DoctorController::class, 'patientHistory']);

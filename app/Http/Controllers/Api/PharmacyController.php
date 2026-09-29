@@ -21,8 +21,8 @@ class PharmacyController extends ApiController
 
         foreach ($prescriptions as $p) {
             $p->items = DB::table('prescription_items')
-                ->join('medicines', 'prescription_items.medicine_id', '=', 'medicines.id')
-                ->select('prescription_items.*', 'medicines.name as medicine_name', 'medicines.unit_price', 'medicines.quantity as stock_qty')
+                ->leftJoin('medicines', 'prescription_items.medicine_id', '=', 'medicines.id')
+                ->select('prescription_items.*', DB::raw('COALESCE(medicines.name, prescription_items.medicine_name) as medicine_name'), 'medicines.unit_price', 'medicines.quantity as stock_qty')
                 ->where('prescription_id', $p->id)
                 ->get();
         }
@@ -58,7 +58,9 @@ class PharmacyController extends ApiController
         $totalPrice = 0;
 
         foreach ($items as $item) {
-            $med = DB::table('medicines')->where('id', $item->medicine_id)->first();
+            $med = $item->medicine_id
+                ? DB::table('medicines')->where('id', $item->medicine_id)->first()
+                : DB::table('medicines')->where('name', $item->medicine_name)->first();
             if ($med) {
                 $totalPrice += $med->unit_price;
 
