@@ -1,4 +1,4 @@
-import { Patient, PatientHistory, Visit, LabRequest, Prescription, InventoryItem, Medicine } from '@/types/medical';
+import { Patient, PatientHistory, Visit, LabRequest, Prescription, InventoryItem, Medicine, AccountingDashboardData } from '@/types/medical';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
@@ -118,5 +118,38 @@ export function dispensePrescription(id: number, pharmacistId: number) {
   return apiRequest<null>(`/pharmacy/prescriptions/${id}/dispense`, {
     method: 'POST',
     body: JSON.stringify({ pharmacist_id: pharmacistId }),
+  });
+}
+
+// ─── Accounting ──────────────────────────────────────────────────────────────
+
+export function getAccountingDashboard(params: { from?: string; to?: string }) {
+  return apiRequest<AccountingDashboardData>(`/accountant/dashboard${query(params)}`);
+}
+
+export function addVoucher(data: {
+  created_by: number;
+  voucher_type: 'income' | 'expense';
+  category: string;
+  amount: number;
+  description: string;
+  cash_account_code: '101' | '102';
+  date?: string;
+}) {
+  return apiRequest<{ voucher_id: number; journal_entry_id: number }>('/accountant/vouchers', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function addJournalEntry(data: {
+  created_by: number;
+  entry_date?: string;
+  description: string;
+  lines: { account_id: number; debit?: number; credit?: number; memo?: string }[];
+}) {
+  return apiRequest<{ journal_entry_id: number; entry_number: string }>('/accountant/journal-entries', {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }

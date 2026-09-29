@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
+use App\Services\Ledger;
 use Illuminate\Support\Facades\DB;
 
 class PharmacyController extends ApiController
@@ -53,6 +54,9 @@ class PharmacyController extends ApiController
         if (!$prescription) {
             return $this->error('الوصفة الطبية غير موجودة', 404);
         }
+        if ($prescription->status === 'dispensed') {
+            return $this->error('تم صرف هذه الوصفة مسبقاً.', 422);
+        }
 
         $items = DB::table('prescription_items')->where('prescription_id', $id)->get();
         $totalPrice = 0;
@@ -95,7 +99,7 @@ class PharmacyController extends ApiController
         ]);
 
         // Record income in vouchers for Accountant
-        DB::table('vouchers')->insert([
+        Ledger::recordVoucher([
             'voucher_type' => 'income',
             'category' => 'pharmacy_income',
             'amount' => $totalPrice,

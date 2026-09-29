@@ -56,6 +56,7 @@ Route::prefix('v1')->group(function () {
     // Accountant Routes
     Route::get('/accountant/dashboard', [AccountantController::class, 'dashboard']);
     Route::post('/accountant/vouchers', [AccountantController::class, 'addVoucher']);
+    Route::post('/accountant/journal-entries', [AccountantController::class, 'addJournalEntry']);
 
     // HR Routes
     Route::get('/hr/dashboard', [HrController::class, 'dashboard']);

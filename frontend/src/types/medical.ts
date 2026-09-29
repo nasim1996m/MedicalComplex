@@ -137,6 +137,11 @@ export interface ChartOfAccount {
   name: string;
   type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
   balance: number;
+  opening_balance?: number;
+  period_debit?: number;
+  period_credit?: number;
+  trial_debit?: number;
+  trial_credit?: number;
 }
 
 // Double Entry Journal Entry Entity (سند القيد المحاسبي المزدوج)
@@ -169,6 +174,8 @@ export interface Voucher {
   creator_name?: string;
   creator_role?: string;
   created_at: string;
+  entry_number?: string | null;
+  voucher_date?: string;
 }
 
 export interface HrEmployee {
@@ -224,4 +231,22 @@ export interface PatientHistory {
   visits: Visit[];
   lab_results: LabRequest[];
   prescriptions: Prescription[];
+}
+
+// لوحة المحاسبة كما يرجعها الباك إند: GET /accountant/dashboard
+export interface AccountingDashboardData {
+  from: string | null;
+  to: string | null;
+  vouchers: Voucher[];
+  journal_entries: JournalEntry[];
+  accounts: ChartOfAccount[];
+  trial_balance: { total_debit: number; total_credit: number; difference: number; is_balanced: boolean };
+  summary: {
+    total_income: number;
+    total_expense: number;
+    net_profit: number;
+    doctor_income: number;
+    pharmacy_income: number;
+    lab_income: number;
+  };
 }

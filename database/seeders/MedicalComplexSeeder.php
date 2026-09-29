@@ -83,37 +83,25 @@ class MedicalComplexSeeder extends Seeder
         ]);
 
         // Chart of Accounts (دليل الحسابات المحاسبي الموحد للمجمع الطبي)
-        $accCash = DB::table('chart_of_accounts')->insertGetId(['code' => '101', 'name' => 'الصندوق الرئيسي (الخزينة)', 'type' => 'asset', 'balance' => 4500000, 'created_at' => now(), 'updated_at' => now()]);
-        $accBank = DB::table('chart_of_accounts')->insertGetId(['code' => '102', 'name' => 'حساب البنك (المصرف)', 'type' => 'asset', 'balance' => 12000000, 'created_at' => now(), 'updated_at' => now()]);
-        $accPharmacyInv = DB::table('chart_of_accounts')->insertGetId(['code' => '103', 'name' => 'مخزون الصيدلية (الأدوية)', 'type' => 'asset', 'balance' => 3500000, 'created_at' => now(), 'updated_at' => now()]);
-        $accLabInv = DB::table('chart_of_accounts')->insertGetId(['code' => '104', 'name' => 'مخزون المستلزمات والمختبر', 'type' => 'asset', 'balance' => 1800000, 'created_at' => now(), 'updated_at' => now()]);
+        $accCash = DB::table('chart_of_accounts')->insertGetId(['code' => '101', 'name' => 'الصندوق الرئيسي (الخزينة)', 'type' => 'asset', 'balance' => 4500000, 'opening_balance' => 4500000, 'created_at' => now(), 'updated_at' => now()]);
+        $accBank = DB::table('chart_of_accounts')->insertGetId(['code' => '102', 'name' => 'حساب البنك (المصرف)', 'type' => 'asset', 'balance' => 12000000, 'opening_balance' => 12000000, 'created_at' => now(), 'updated_at' => now()]);
+        $accPharmacyInv = DB::table('chart_of_accounts')->insertGetId(['code' => '103', 'name' => 'مخزون الصيدلية (الأدوية)', 'type' => 'asset', 'balance' => 3500000, 'opening_balance' => 3500000, 'created_at' => now(), 'updated_at' => now()]);
+        $accLabInv = DB::table('chart_of_accounts')->insertGetId(['code' => '104', 'name' => 'مخزون المستلزمات والمختبر', 'type' => 'asset', 'balance' => 1800000, 'opening_balance' => 1800000, 'created_at' => now(), 'updated_at' => now()]);
         
-        $accPayable = DB::table('chart_of_accounts')->insertGetId(['code' => '201', 'name' => 'موردو الأدوية والأجهزة (ذمم دائنة)', 'type' => 'liability', 'balance' => 1200000, 'created_at' => now(), 'updated_at' => now()]);
-        $accCapital = DB::table('chart_of_accounts')->insertGetId(['code' => '301', 'name' => 'رأس المال والمستثمرين', 'type' => 'equity', 'balance' => 20000000, 'created_at' => now(), 'updated_at' => now()]);
+        $accPayable = DB::table('chart_of_accounts')->insertGetId(['code' => '201', 'name' => 'موردو الأدوية والأجهزة (ذمم دائنة)', 'type' => 'liability', 'balance' => 1200000, 'opening_balance' => 1200000, 'created_at' => now(), 'updated_at' => now()]);
+        $accCapital = DB::table('chart_of_accounts')->insertGetId(['code' => '301', 'name' => 'رأس المال والمستثمرين', 'type' => 'equity', 'balance' => 20600000, 'opening_balance' => 20600000, 'created_at' => now(), 'updated_at' => now()]);
         
-        $accRevDoctor = DB::table('chart_of_accounts')->insertGetId(['code' => '401', 'name' => 'إيرادات كشوفات الأطباء', 'type' => 'revenue', 'balance' => 250000, 'created_at' => now(), 'updated_at' => now()]);
-        $accRevPharm = DB::table('chart_of_accounts')->insertGetId(['code' => '402', 'name' => 'إيرادات مبيعات الصيدلية', 'type' => 'revenue', 'balance' => 180000, 'created_at' => now(), 'updated_at' => now()]);
-        $accRevLab = DB::table('chart_of_accounts')->insertGetId(['code' => '403', 'name' => 'إيرادات التحاليل والأشعة', 'type' => 'revenue', 'balance' => 150000, 'created_at' => now(), 'updated_at' => now()]);
+        $accRevDoctor = DB::table('chart_of_accounts')->insertGetId(['code' => '401', 'name' => 'إيرادات كشوفات الأطباء', 'type' => 'revenue', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        $accRevPharm = DB::table('chart_of_accounts')->insertGetId(['code' => '402', 'name' => 'إيرادات مبيعات الصيدلية', 'type' => 'revenue', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        $accRevLab = DB::table('chart_of_accounts')->insertGetId(['code' => '403', 'name' => 'إيرادات التحاليل والأشعة', 'type' => 'revenue', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()]);
         
-        $accExpElec = DB::table('chart_of_accounts')->insertGetId(['code' => '501', 'name' => 'مصاريف الكهرباء والمولدات', 'type' => 'expense', 'balance' => 120000, 'created_at' => now(), 'updated_at' => now()]);
-        $accExpSalaries = DB::table('chart_of_accounts')->insertGetId(['code' => '502', 'name' => 'رواتب وأجور الموظفين والحرس', 'type' => 'expense', 'balance' => 3100000, 'created_at' => now(), 'updated_at' => now()]);
-        $accExpHosp = DB::table('chart_of_accounts')->insertGetId(['code' => '503', 'name' => 'مصاريف الضيافة والنظافة', 'type' => 'expense', 'balance' => 35000, 'created_at' => now(), 'updated_at' => now()]);
-
-        // Sample Double Entry Journal Entry (قيد محاسبي مزدوج متوازن)
-        $jEntryId = DB::table('journal_entries')->insertGetId([
-            'entry_number' => 'JV-2026-001',
-            'entry_date' => Carbon::today(),
-            'description' => 'قيد تحصيل كشوفات وتصفية فاتورة الكهرباء والمولد اليومية',
-            'total_debit' => 250000,
-            'total_credit' => 250000,
-            'created_by' => $accountantId,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        DB::table('journal_entry_items')->insert([
-            ['journal_entry_id' => $jEntryId, 'account_id' => $accCash, 'debit' => 250000, 'credit' => 0, 'memo' => 'قبض كشوفات الأطباء نقداً بالصندوق', 'created_at' => now(), 'updated_at' => now()],
-            ['journal_entry_id' => $jEntryId, 'account_id' => $accRevDoctor, 'debit' => 0, 'credit' => 250000, 'memo' => 'إثبات إيراد الكشوفات', 'created_at' => now(), 'updated_at' => now()],
+        $accExpElec = DB::table('chart_of_accounts')->insertGetId(['code' => '501', 'name' => 'مصاريف الكهرباء والمولدات', 'type' => 'expense', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        $accExpSalaries = DB::table('chart_of_accounts')->insertGetId(['code' => '502', 'name' => 'رواتب وأجور الموظفين والحرس', 'type' => 'expense', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        $accExpHosp = DB::table('chart_of_accounts')->insertGetId(['code' => '503', 'name' => 'مصاريف الضيافة والنظافة', 'type' => 'expense', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('chart_of_accounts')->insert([
+            ['code' => '404', 'name' => 'إيرادات أخرى', 'type' => 'revenue', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '504', 'name' => 'مصاريف الماء والاتصالات والإنترنت', 'type' => 'expense', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()],
+            ['code' => '505', 'name' => 'مصاريف عامة (قرطاسية، عقود، صيانة، مشتريات)', 'type' => 'expense', 'balance' => 0, 'opening_balance' => 0, 'created_at' => now(), 'updated_at' => now()],
         ]);
 
         // Patients
@@ -127,11 +115,13 @@ class MedicalComplexSeeder extends Seeder
         $m1 = DB::table('medicines')->insertGetId(['name' => 'Amoxicillin 500mg (أمكسيسيلين)', 'barcode' => '62911001', 'category' => 'مضاد حيوي', 'unit_price' => 5000, 'quantity' => 120, 'min_threshold' => 15, 'expiry_date' => '2027-06-30', 'batch_number' => 'BATCH-8821', 'created_at' => now(), 'updated_at' => now()]);
         $m2 = DB::table('medicines')->insertGetId(['name' => 'Paracetamol 500mg (باراسيتامول)', 'barcode' => '62911002', 'category' => 'مسكن آلام', 'unit_price' => 2000, 'quantity' => 10, 'min_threshold' => 15, 'expiry_date' => '2026-11-15', 'batch_number' => 'BATCH-4412', 'created_at' => now(), 'updated_at' => now()]);
 
-        // Vouchers
-        DB::table('vouchers')->insert([
-            ['voucher_type' => 'income', 'category' => 'doctor_income', 'amount' => 250000, 'description' => 'إيراد كشوفات د. أحمد علي السامرائي اليومية', 'created_by' => $accountantId, 'status' => 'approved', 'created_at' => now(), 'updated_at' => now()],
-            ['voucher_type' => 'expense', 'category' => 'electricity', 'amount' => 120000, 'description' => 'تسديد فاتورة الكهرباء والمولد الخاص بالمجمع', 'created_by' => $accountantId, 'status' => 'approved', 'created_at' => now(), 'updated_at' => now()],
-            ['voucher_type' => 'expense', 'category' => 'hospitality', 'amount' => 35000, 'description' => 'ضيافة مراجعين ومشروبات العيادات', 'created_by' => $accountantId, 'status' => 'approved', 'created_at' => now(), 'updated_at' => now()],
-        ]);
+        // Vouchers (each one is posted to the ledger as a balanced double entry)
+        foreach ([
+            ['voucher_type' => 'income', 'category' => 'doctor_income', 'amount' => 250000, 'description' => 'إيراد كشوفات د. أحمد علي السامرائي اليومية'],
+            ['voucher_type' => 'expense', 'category' => 'electricity', 'amount' => 120000, 'description' => 'تسديد فاتورة الكهرباء والمولد الخاص بالمجمع'],
+            ['voucher_type' => 'expense', 'category' => 'hospitality', 'amount' => 35000, 'description' => 'ضيافة مراجعين ومشروبات العيادات'],
+        ] as $voucher) {
+            \App\Services\Ledger::recordVoucher($voucher + ['created_by' => $accountantId]);
+        }
     }
 }

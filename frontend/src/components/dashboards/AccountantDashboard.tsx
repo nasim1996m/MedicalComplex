@@ -1,109 +1,207 @@
 'use client';
 
-import React, { useState } from 'react';
-import { mockData } from '@/services/api';
-import { Voucher, ChartOfAccount, JournalEntry } from '@/types/medical';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AccountingDashboardData, ChartOfAccount } from '@/types/medical';
+import { useAuth } from '@/context/AuthContext';
+import { addJournalEntry, addVoucher, getAccountingDashboard, todayISO } from '@/services/medicalApi';
 import {
   Calculator,
   Plus,
   CheckCircle2,
-  TrendingUp,
-  DollarSign,
   FileText,
   BookOpen,
   Scale,
-  Building2,
-  AlertCircle,
-  BarChart3,
+  AlertTriangle,
+  Loader2,
+  CalendarRange,
 } from 'lucide-react';
 
+// البنود المحاسبية للسندات (يجب أن تطابق Ledger::CATEGORY_ACCOUNTS في الباك إند)
+const EXPENSE_CATEGORIES: Record<string, string> = {
+  electricity: 'كهرباء ومولدات',
+  salary: 'رواتب وأجور',
+  water: 'ماء وخدمات صحية',
+  telecom: 'اتصالات وإنترنت',
+  hospitality: 'ضيافة ومشروبات',
+  cleaning: 'منظفات ومعقمات',
+  stationary: 'قرطاسية ومطبوعات',
+  contracts: 'عقود وصيانة',
+  inventory_purchase: 'مشتريات مخزن',
+  other_expense: 'مصاريف أخرى',
+};
+
+const INCOME_CATEGORIES: Record<string, string> = {
+  other_income: 'إيرادات أخرى',
+  doctor_income: 'إيراد كشوفات الأطباء',
+  pharmacy_income: 'إيراد مبيعات الصيدلية',
+  lab_income: 'إيراد التحاليل والأشعة',
+};
+
+const CATEGORY_LABELS: Record<string, string> = { ...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES };
+
+const TYPE_LABELS: Record<ChartOfAccount['type'], string> = {
+  asset: 'أصول',
+  liability: 'التزامات',
+  equity: 'حقوق ملكية',
+  revenue: 'إيرادات',
+  expense: 'مصروفات',
+};
+
+const TYPE_STYLES: Record<ChartOfAccount['type'], string> = {
+  asset: 'bg-sky-100 text-sky-800',
+  liability: 'bg-amber-100 text-amber-800',
+  equity: 'bg-violet-100 text-violet-800',
+  revenue: 'bg-emerald-100 text-emerald-800',
+  expense: 'bg-rose-100 text-rose-800',
+};
+
+/** Decimal columns may arrive as strings from MySQL */
+const money = (value: number | string | null | undefined) =>
+  `${Number(value ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} د.ع`;
+
+function monthStartISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
 export default function AccountantDashboard() {
+  const { user } = useAuth();
   const [activeAccTab, setActiveAccTab] = useState<'chart' | 'journal' | 'trial' | 'vouchers'>('journal');
 
-  const [vouchers, setVouchers] = useState<Voucher[]>(mockData.vouchers);
-  const [accounts, setAccounts] = useState<ChartOfAccount[]>(mockData.chartOfAccounts);
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>(mockData.journalEntries);
+  const [data, setData] = useState<AccountingDashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
+
+  // Period filter
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
 
   // New Journal Entry Form (Double-Entry Bookkeeping)
   const [entryDescription, setEntryDescription] = useState('');
-  const [debitAccId, setDebitAccId] = useState<number>(1); // Cash by default
-  const [creditAccId, setCreditAccId] = useState<number>(7); // Revenue by default
+  const [entryDate, setEntryDate] = useState(todayISO());
+  const [debitAccId, setDebitAccId] = useState<number>(0);
+  const [creditAccId, setCreditAccId] = useState<number>(0);
   const [entryAmount, setEntryAmount] = useState<number>(150000);
 
-  // Simple Voucher Form
+  // Voucher Form
   const [voucherType, setVoucherType] = useState<'income' | 'expense'>('expense');
   const [category, setCategory] = useState('electricity');
+  const [cashAccount, setCashAccount] = useState<'101' | '102'>('101');
   const [amount, setAmount] = useState<number>(50000);
+  const [voucherDate, setVoucherDate] = useState(todayISO());
   const [description, setDescription] = useState('');
-
-  const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
   const showNotification = (msg: string) => {
     setNotificationMsg(msg);
     setTimeout(() => setNotificationMsg(null), 3500);
   };
 
+  const applyData = useCallback((result: AccountingDashboardData) => {
+    setData(result);
+    // Default journal accounts: cash (101) debit, doctor revenue (401) credit
+    const byCode = (code: string) => result.accounts.find((a) => a.code === code)?.id ?? result.accounts[0]?.id ?? 0;
+    setDebitAccId((current) => current || byCode('101'));
+    setCreditAccId((current) => current || byCode('401'));
+  }, []);
+
+  const reload = useCallback(
+    async (range: { from: string; to: string }) => {
+      applyData(await getAccountingDashboard(range));
+      setErrorMsg(null);
+    },
+    [applyData]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    getAccountingDashboard({})
+      .then((result) => !cancelled && applyData(result))
+      .catch((err) => !cancelled && setErrorMsg(err instanceof Error ? err.message : 'فشل تحميل الحسابات'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [applyData]);
+
+  const applyPeriod = async (newFrom: string, newTo: string) => {
+    setFrom(newFrom);
+    setTo(newTo);
+    setLoading(true);
+    try {
+      await reload({ from: newFrom, to: newTo });
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل تحميل الحسابات');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Create Double Entry (Qayd Muzdawaj: Debit = Credit)
-  const handleAddJournalEntry = () => {
-    if (!entryDescription || entryAmount <= 0) return;
+  const handleAddJournalEntry = async () => {
+    if (!user) return;
+    if (!entryDescription.trim()) return setErrorMsg('اكتب البيان والشرح للقيد.');
+    if (!(entryAmount > 0)) return setErrorMsg('المبلغ يجب أن يكون أكبر من صفر.');
+    if (debitAccId === creditAccId) return setErrorMsg('لا يمكن أن يكون الطرف المدين والدائن نفس الحساب.');
 
-    const debitAcc = accounts.find((a) => a.id === Number(debitAccId));
-    const creditAcc = accounts.find((a) => a.id === Number(creditAccId));
-
-    if (!debitAcc || !creditAcc) return;
-
-    const newEntry: JournalEntry = {
-      id: Date.now(),
-      entry_number: `JV-2026-00${journalEntries.length + 1}`,
-      entry_date: new Date().toISOString().split('T')[0],
-      description: entryDescription,
-      total_debit: entryAmount,
-      total_credit: entryAmount,
-      creator_name: 'مصطفى كامل (المحاسب)',
-      items: [
-        { account_id: debitAcc.id, account_code: debitAcc.code, account_name: debitAcc.name, debit: entryAmount, credit: 0, memo: 'طرف مدين' },
-        { account_id: creditAcc.id, account_code: creditAcc.code, account_name: creditAcc.name, debit: 0, credit: entryAmount, memo: 'طرف دائن' },
-      ],
-    };
-
-    // Update account balances
-    setAccounts((prev) =>
-      prev.map((acc) => {
-        if (acc.id === debitAcc.id) return { ...acc, balance: acc.balance + entryAmount };
-        if (acc.id === creditAcc.id) return { ...acc, balance: acc.balance + entryAmount };
-        return acc;
-      })
-    );
-
-    setJournalEntries((prev) => [newEntry, ...prev]);
-    setEntryDescription('');
-    showNotification('تم تسجيل وتثبيت القيد المحاسبي المزدوج (مدين / دائن) بنجاح بالميزانية!');
+    setSaving(true);
+    try {
+      const res = await addJournalEntry({
+        created_by: user.id,
+        entry_date: entryDate,
+        description: entryDescription.trim(),
+        lines: [
+          { account_id: debitAccId, debit: entryAmount, memo: 'طرف مدين' },
+          { account_id: creditAccId, credit: entryAmount, memo: 'طرف دائن' },
+        ],
+      });
+      setEntryDescription('');
+      await reload({ from, to });
+      showNotification(`تم تسجيل القيد المزدوج ${res.entry_number} وترحيله إلى دفتر الأستاذ بنجاح!`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل تسجيل القيد');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  // Add Voucher
-  const handleAddVoucher = () => {
-    if (!description || amount <= 0) return;
+  // Add Voucher (posts its double entry automatically)
+  const handleAddVoucher = async () => {
+    if (!user) return;
+    if (!description.trim()) return setErrorMsg('اكتب الشرح والبيان للسند.');
+    if (!(amount > 0)) return setErrorMsg('المبلغ يجب أن يكون أكبر من صفر.');
 
-    const newVoucher: Voucher = {
-      id: Date.now(),
-      voucher_type: voucherType,
-      category,
-      amount,
-      description,
-      creator_name: 'مصطفى كامل (المحاسب)',
-      created_at: new Date().toLocaleTimeString('ar-SA'),
-    };
-
-    setVouchers((prev) => [newVoucher, ...prev]);
-    setDescription('');
-    showNotification('تم تسجيل سند الصرف/القبض بنجاح!');
+    setSaving(true);
+    try {
+      await addVoucher({
+        created_by: user.id,
+        voucher_type: voucherType,
+        category,
+        amount,
+        description: description.trim(),
+        cash_account_code: cashAccount,
+        date: voucherDate,
+      });
+      setDescription('');
+      await reload({ from, to });
+      showNotification('تم حفظ السند المالي وترحيل قيده المزدوج بنجاح!');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل حفظ السند');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const totalIncome = vouchers.filter((v) => v.voucher_type === 'income').reduce((a, b) => a + b.amount, 0);
-  const totalExpense = vouchers.filter((v) => v.voucher_type === 'expense').reduce((a, b) => a + b.amount, 0);
+  const switchVoucherType = (type: 'income' | 'expense') => {
+    setVoucherType(type);
+    setCategory(type === 'income' ? 'other_income' : 'electricity');
+  };
 
-  const totalDebitSum = journalEntries.reduce((a, b) => a + b.total_debit, 0);
-  const totalCreditSum = journalEntries.reduce((a, b) => a + b.total_credit, 0);
+  const accounts = data?.accounts ?? [];
+  const summary = data?.summary;
+  const trial = data?.trial_balance;
+  const periodLabel = from || to ? `${from || 'البداية'} ← ${to || 'اليوم'}` : 'كل الفترات';
 
   return (
     <div className="space-y-6">
@@ -111,6 +209,18 @@ export default function AccountantDashboard() {
         <div className="bg-emerald-900/90 text-emerald-100 p-4 rounded-2xl border border-emerald-500/40 shadow-xl flex items-center gap-3 animate-in fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-400" />
           <p className="text-xs font-bold">{notificationMsg}</p>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="bg-rose-50 text-rose-800 p-4 rounded-2xl border border-rose-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            <p className="text-xs font-bold">{errorMsg}</p>
+          </div>
+          <button onClick={() => setErrorMsg(null)} className="text-rose-400 hover:text-rose-700 text-xs font-bold">
+            ✕
+          </button>
         </div>
       )}
 
@@ -128,54 +238,84 @@ export default function AccountantDashboard() {
 
         {/* Sub-Tab Switcher */}
         <div className="flex items-center gap-1.5 bg-indigo-950/90 p-1.5 rounded-xl border border-indigo-800/40">
-          <button
-            onClick={() => setActiveAccTab('journal')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeAccTab === 'journal' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-200 hover:text-white'
+          {(
+            [
+              ['journal', 'دفتر القيد المزدوج'],
+              ['chart', 'دليل الحسابات'],
+              ['trial', 'ميزان المراجعة'],
+              ['vouchers', 'السندات والمصاريف'],
+            ] as const
+          ).map(([tab, label]) => (
+            <button
+              key={tab}
+              onClick={() => setActiveAccTab(tab)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                activeAccTab === tab ? 'bg-indigo-600 text-white shadow' : 'text-indigo-200 hover:text-white'
               }`}
-          >
-            دفتر القيد المزدوج
-          </button>
-          <button
-            onClick={() => setActiveAccTab('chart')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeAccTab === 'chart' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-200 hover:text-white'
-              }`}
-          >
-            دليل الحسابات
-          </button>
-          <button
-            onClick={() => setActiveAccTab('trial')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeAccTab === 'trial' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-200 hover:text-white'
-              }`}
-          >
-            ميزان المراجعة
-          </button>
-          <button
-            onClick={() => setActiveAccTab('vouchers')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeAccTab === 'vouchers' ? 'bg-indigo-600 text-white shadow' : 'text-indigo-200 hover:text-white'
-              }`}
-          >
-            السندات والمصاريف
-          </button>
+            >
+              {label}
+            </button>
+          ))}
         </div>
+      </div>
+
+      {/* Period filter */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-wrap items-end gap-3 text-xs">
+        <CalendarRange className="w-5 h-5 text-indigo-600 mb-2" />
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">من تاريخ:</label>
+          <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="border border-slate-300 rounded-xl p-2 bg-white" />
+        </div>
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">إلى تاريخ:</label>
+          <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="border border-slate-300 rounded-xl p-2 bg-white" />
+        </div>
+        <button onClick={() => applyPeriod(from, to)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl">
+          عرض الفترة
+        </button>
+        <button onClick={() => applyPeriod(todayISO(), todayISO())} className="bg-white border border-slate-300 hover:bg-slate-100 font-bold px-3 py-2 rounded-xl text-slate-700">
+          اليوم
+        </button>
+        <button onClick={() => applyPeriod(monthStartISO(), todayISO())} className="bg-white border border-slate-300 hover:bg-slate-100 font-bold px-3 py-2 rounded-xl text-slate-700">
+          هذا الشهر
+        </button>
+        <button onClick={() => applyPeriod('', '')} className="bg-white border border-slate-300 hover:bg-slate-100 font-bold px-3 py-2 rounded-xl text-slate-700">
+          كل الفترات
+        </button>
+        <span className="text-slate-500 font-bold mr-auto">الفترة المعروضة: {periodLabel}</span>
+        {loading && <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />}
       </div>
 
       {/* Financial Overview Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-emerald-950/80 text-white p-4.5 rounded-2xl border border-emerald-800/40 shadow-lg">
-          <p className="text-xs font-medium text-emerald-300">إجمالي المقبوضات (الإيرادات)</p>
-          <h3 className="text-xl font-extrabold text-emerald-400 mt-1">{totalIncome.toLocaleString()} د.ع</h3>
+          <p className="text-xs font-medium text-emerald-300">إجمالي الإيرادات للفترة</p>
+          <h3 className="text-xl font-extrabold text-emerald-400 mt-1">{money(summary?.total_income)}</h3>
+          <p className="text-[10px] text-emerald-200/80 mt-1">
+            كشوفات {money(summary?.doctor_income)} · صيدلية {money(summary?.pharmacy_income)} · مختبر {money(summary?.lab_income)}
+          </p>
         </div>
         <div className="bg-rose-950/80 text-white p-4.5 rounded-2xl border border-rose-800/40 shadow-lg">
-          <p className="text-xs font-medium text-rose-300">إجمالي المدفوعات (المصاريف)</p>
-          <h3 className="text-xl font-extrabold text-rose-400 mt-1">{totalExpense.toLocaleString()} د.ع</h3>
+          <p className="text-xs font-medium text-rose-300">إجمالي المصروفات للفترة</p>
+          <h3 className="text-xl font-extrabold text-rose-400 mt-1">{money(summary?.total_expense)}</h3>
         </div>
         <div className="bg-[#1e1b4b] text-white p-4.5 rounded-2xl border border-indigo-700/50 shadow-lg">
-          <p className="text-xs font-medium text-sky-300">صافي الأرباح التشغيلية</p>
-          <h3 className="text-xl font-extrabold text-white mt-1">{(totalIncome - totalExpense).toLocaleString()} د.ع</h3>
+          <p className="text-xs font-medium text-sky-300">صافي الربح للفترة</p>
+          <h3 className={`text-xl font-extrabold mt-1 ${Number(summary?.net_profit ?? 0) < 0 ? 'text-rose-400' : 'text-white'}`}>
+            {money(summary?.net_profit)}
+          </h3>
         </div>
         <div className="bg-slate-900 text-white p-4.5 rounded-2xl border border-slate-700/50 shadow-lg">
-          <p className="text-xs font-medium text-indigo-300">توازن القيد المزدوج (Debit / Credit)</p>
-          <h3 className="text-xl font-extrabold text-emerald-400 mt-1">متوازن 100%</h3>
+          <p className="text-xs font-medium text-indigo-300">توازن ميزان المراجعة (مدين / دائن)</p>
+          {trial ? (
+            trial.is_balanced ? (
+              <h3 className="text-xl font-extrabold text-emerald-400 mt-1">متوازن ✓</h3>
+            ) : (
+              <h3 className="text-base font-extrabold text-rose-400 mt-1">غير متوازن — الفرق {money(trial.difference)}</h3>
+            )
+          ) : (
+            <h3 className="text-xl font-extrabold text-slate-500 mt-1">—</h3>
+          )}
         </div>
       </div>
 
@@ -191,7 +331,7 @@ export default function AccountantDashboard() {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">الطرف المدين (Debit - الإخَذ/المصروف/الصندوق):</label>
+                <label className="block font-bold text-slate-700 mb-1">الطرف المدين (Debit):</label>
                 <select
                   value={debitAccId}
                   onChange={(e) => setDebitAccId(Number(e.target.value))}
@@ -199,35 +339,52 @@ export default function AccountantDashboard() {
                 >
                   {accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
-                      [{acc.code}] {acc.name} ({acc.type})
+                      [{acc.code}] {acc.name} ({TYPE_LABELS[acc.type]})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">الطرف الدائن (Credit - المَعطي/الإيراد/المصرف):</label>
+                <label className="block font-bold text-slate-700 mb-1">الطرف الدائن (Credit):</label>
                 <select
                   value={creditAccId}
                   onChange={(e) => setCreditAccId(Number(e.target.value))}
-                  className="w-full border border-slate-300 rounded-xl p-2.5 bg-white font-bold text-slate-800"
+                  className={`w-full border rounded-xl p-2.5 bg-white font-bold text-slate-800 ${
+                    debitAccId === creditAccId ? 'border-rose-500' : 'border-slate-300'
+                  }`}
                 >
                   {accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
-                      [{acc.code}] {acc.name} ({acc.type})
+                      [{acc.code}] {acc.name} ({TYPE_LABELS[acc.type]})
                     </option>
                   ))}
                 </select>
+                {debitAccId === creditAccId && (
+                  <p className="text-rose-600 mt-1">لا يمكن اختيار نفس الحساب للطرفين.</p>
+                )}
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">المبلغ (د.ع):</label>
-                <input
-                  type="number"
-                  value={entryAmount}
-                  onChange={(e) => setEntryAmount(Number(e.target.value))}
-                  className="w-full border border-slate-300 rounded-xl p-2.5 font-bold text-indigo-950 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">المبلغ (د.ع):</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={entryAmount}
+                    onChange={(e) => setEntryAmount(Number(e.target.value))}
+                    className="w-full border border-slate-300 rounded-xl p-2.5 font-bold text-indigo-950 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">تاريخ القيد:</label>
+                  <input
+                    type="date"
+                    value={entryDate}
+                    onChange={(e) => setEntryDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div>
@@ -243,9 +400,10 @@ export default function AccountantDashboard() {
 
               <button
                 onClick={handleAddJournalEntry}
-                className="w-full bg-[#1e1b4b] hover:bg-[#312e81] text-white font-bold py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-2"
+                disabled={saving || debitAccId === creditAccId}
+                className="w-full bg-[#1e1b4b] hover:bg-[#312e81] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4 text-sky-400" />
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-sky-400" />}
                 <span>حفظ وتثبيت القيد المزدوج المتوازن</span>
               </button>
             </div>
@@ -255,17 +413,22 @@ export default function AccountantDashboard() {
           <div className="lg:col-span-2 bg-white rounded-2xl shadow-md border border-slate-200 p-6 space-y-4">
             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2 border-b border-slate-100 pb-3">
               <FileText className="w-4 h-4 text-emerald-600" />
-              <span>دفتر القيد اليومي المزدوج المسجل بالمنظومة</span>
+              <span>دفتر اليومية ({data?.journal_entries.length ?? 0} قيد)</span>
             </h3>
 
-            <div className="space-y-4">
-              {journalEntries.map((je) => (
+            <div className="space-y-4 max-h-[700px] overflow-y-auto">
+              {!loading && data?.journal_entries.length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-6">لا توجد قيود في هذه الفترة.</p>
+              )}
+              {data?.journal_entries.map((je) => (
                 <div key={je.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2">
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-extrabold text-indigo-900 bg-indigo-100 px-2.5 py-1 rounded-lg">
                       رقم القيد: {je.entry_number}
                     </span>
-                    <span className="text-slate-500 font-mono">{je.entry_date}</span>
+                    <span className="text-slate-500 font-mono">
+                      {String(je.entry_date).slice(0, 10)} {je.creator_name ? `· ${je.creator_name}` : ''}
+                    </span>
                   </div>
                   <p className="text-xs font-bold text-slate-800">{je.description}</p>
 
@@ -285,15 +448,19 @@ export default function AccountantDashboard() {
                           <tr key={idx} className="hover:bg-slate-50">
                             <td className="p-2 font-mono font-bold text-indigo-700">{item.account_code}</td>
                             <td className="p-2 font-bold text-slate-800">{item.account_name}</td>
-                            <td className="p-2 font-bold text-emerald-700">
-                              {item.debit > 0 ? `${item.debit.toLocaleString()} د.ع` : '-'}
-                            </td>
-                            <td className="p-2 font-bold text-rose-700">
-                              {item.credit > 0 ? `${item.credit.toLocaleString()} د.ع` : '-'}
-                            </td>
+                            <td className="p-2 font-bold text-emerald-700">{Number(item.debit) > 0 ? money(item.debit) : '-'}</td>
+                            <td className="p-2 font-bold text-rose-700">{Number(item.credit) > 0 ? money(item.credit) : '-'}</td>
                             <td className="p-2 text-slate-500">{item.memo}</td>
                           </tr>
                         ))}
+                        <tr className="bg-slate-100 font-extrabold">
+                          <td className="p-2" colSpan={2}>
+                            المجموع
+                          </td>
+                          <td className="p-2 text-emerald-800">{money(je.total_debit)}</td>
+                          <td className="p-2 text-rose-800">{money(je.total_credit)}</td>
+                          <td className="p-2"></td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>
@@ -309,7 +476,7 @@ export default function AccountantDashboard() {
         <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-6 space-y-4">
           <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2 border-b border-slate-100 pb-3">
             <BookOpen className="w-4 h-4 text-indigo-600" />
-            <span>دليل الحسابات المحاسبي الموحد للمجمع الطبي (Chart of Accounts)</span>
+            <span>دليل الحسابات وأرصدتها (الرصيد حتى نهاية الفترة، والحركة خلال الفترة)</span>
           </h3>
 
           <div className="overflow-x-auto">
@@ -318,8 +485,11 @@ export default function AccountantDashboard() {
                 <tr>
                   <th className="p-3">رمز الحساب</th>
                   <th className="p-3">اسم الحساب المحاسبي</th>
-                  <th className="p-3">تصنيف الحساب</th>
-                  <th className="p-3">الرصيد الحرفي الحالي</th>
+                  <th className="p-3">التصنيف</th>
+                  <th className="p-3">الرصيد الافتتاحي</th>
+                  <th className="p-3">حركة مدينة</th>
+                  <th className="p-3">حركة دائنة</th>
+                  <th className="p-3">الرصيد الحالي</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -328,18 +498,12 @@ export default function AccountantDashboard() {
                     <td className="p-3 font-mono font-bold text-indigo-800">{acc.code}</td>
                     <td className="p-3 font-bold text-slate-900">{acc.name}</td>
                     <td className="p-3">
-                      <span className={`font-bold px-2 py-0.5 rounded-md ${acc.type === 'asset' ? 'bg-sky-100 text-sky-800' :
-                          acc.type === 'liability' ? 'bg-amber-100 text-amber-800' :
-                            acc.type === 'revenue' ? 'bg-emerald-100 text-emerald-800' :
-                              'bg-rose-100 text-rose-800'
-                        }`}>
-                        {acc.type === 'asset' ? 'أصول (Assets)' :
-                          acc.type === 'liability' ? 'التزامات (Liabilities)' :
-                            acc.type === 'equity' ? 'حقوق ملكية (Equity)' :
-                              acc.type === 'revenue' ? 'إيرادات (Revenues)' : 'مصروفات (Expenses)'}
-                      </span>
+                      <span className={`font-bold px-2 py-0.5 rounded-md ${TYPE_STYLES[acc.type]}`}>{TYPE_LABELS[acc.type]}</span>
                     </td>
-                    <td className="p-3 font-extrabold text-slate-900">{acc.balance.toLocaleString()} د.ع</td>
+                    <td className="p-3 text-slate-600">{money(acc.opening_balance)}</td>
+                    <td className="p-3 text-emerald-700">{money(acc.period_debit)}</td>
+                    <td className="p-3 text-rose-700">{money(acc.period_credit)}</td>
+                    <td className={`p-3 font-extrabold ${Number(acc.balance) < 0 ? 'text-rose-700' : 'text-slate-900'}`}>{money(acc.balance)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -354,11 +518,17 @@ export default function AccountantDashboard() {
           <h3 className="font-bold text-slate-900 text-sm flex items-center justify-between border-b border-slate-100 pb-3">
             <span className="flex items-center gap-2">
               <Scale className="w-4 h-4 text-emerald-600" />
-              <span>ميزان المراجعة العام (Trial Balance)</span>
+              <span>ميزان المراجعة بالأرصدة (Trial Balance) {to ? `حتى ${to}` : ''}</span>
             </span>
-            <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full">
-              متوازن 100%
-            </span>
+            {trial && (
+              <span
+                className={`text-xs font-bold px-3 py-1 rounded-full ${
+                  trial.is_balanced ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                }`}
+              >
+                {trial.is_balanced ? 'متوازن ✓' : `غير متوازن — الفرق ${money(trial.difference)}`}
+              </span>
+            )}
           </h3>
 
           <div className="overflow-x-auto">
@@ -367,8 +537,8 @@ export default function AccountantDashboard() {
                 <tr>
                   <th className="p-3">رمز الحساب</th>
                   <th className="p-3">اسم الحساب</th>
-                  <th className="p-3">إجمالي الأرصدة المدينة (Debit)</th>
-                  <th className="p-3">إجمالي الأرصدة الدائنة (Credit)</th>
+                  <th className="p-3">رصيد مدين (Debit)</th>
+                  <th className="p-3">رصيد دائن (Credit)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -376,14 +546,19 @@ export default function AccountantDashboard() {
                   <tr key={acc.id} className="hover:bg-slate-50 transition">
                     <td className="p-3 font-mono font-bold text-indigo-700">{acc.code}</td>
                     <td className="p-3 font-bold text-slate-800">{acc.name}</td>
-                    <td className="p-3 font-bold text-emerald-700">
-                      {['asset', 'expense'].includes(acc.type) ? `${acc.balance.toLocaleString()} د.ع` : '-'}
-                    </td>
-                    <td className="p-3 font-bold text-rose-700">
-                      {['liability', 'equity', 'revenue'].includes(acc.type) ? `${acc.balance.toLocaleString()} د.ع` : '-'}
-                    </td>
+                    <td className="p-3 font-bold text-emerald-700">{Number(acc.trial_debit) > 0 ? money(acc.trial_debit) : '-'}</td>
+                    <td className="p-3 font-bold text-rose-700">{Number(acc.trial_credit) > 0 ? money(acc.trial_credit) : '-'}</td>
                   </tr>
                 ))}
+                {trial && (
+                  <tr className="bg-slate-100 font-extrabold text-slate-900">
+                    <td className="p-3" colSpan={2}>
+                      الإجمالي
+                    </td>
+                    <td className="p-3 text-emerald-800">{money(trial.total_debit)}</td>
+                    <td className="p-3 text-rose-800">{money(trial.total_credit)}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -405,21 +580,19 @@ export default function AccountantDashboard() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setVoucherType('expense')}
-                    className={`p-2 rounded-xl font-bold border transition ${voucherType === 'expense'
-                        ? 'bg-rose-900 text-white border-rose-600'
-                        : 'bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
+                    onClick={() => switchVoucherType('expense')}
+                    className={`p-2 rounded-xl font-bold border transition ${
+                      voucherType === 'expense' ? 'bg-rose-900 text-white border-rose-600' : 'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
                   >
                     سند صرف (مصاريف)
                   </button>
                   <button
                     type="button"
-                    onClick={() => setVoucherType('income')}
-                    className={`p-2 rounded-xl font-bold border transition ${voucherType === 'income'
-                        ? 'bg-emerald-900 text-white border-emerald-600'
-                        : 'bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
+                    onClick={() => switchVoucherType('income')}
+                    className={`p-2 rounded-xl font-bold border transition ${
+                      voucherType === 'income' ? 'bg-emerald-900 text-white border-emerald-600' : 'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
                   >
                     سند قبض (إيراد)
                   </button>
@@ -427,30 +600,52 @@ export default function AccountantDashboard() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">البند المحاسبي الخدمي:</label>
+                <label className="block font-bold text-slate-700 mb-1">البند المحاسبي:</label>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   className="w-full border border-slate-300 rounded-xl p-2.5 bg-white font-bold text-slate-800"
                 >
-                  <option value="electricity">كهرباء ومولدات</option>
-                  <option value="water">ماء وخدمات صحية</option>
-                  <option value="telecom">اتصالات وإنترنت</option>
-                  <option value="hospitality">ضيافة ومشروبات</option>
-                  <option value="cleaning">منظفات ومعقمات</option>
-                  <option value="stationary">قرطاسية ومطبوعات</option>
-                  <option value="contracts">عقود وصيانة</option>
+                  {Object.entries(voucherType === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">المبلغ (د.ع):</label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(Number(e.target.value))}
-                  className="w-full border border-slate-300 rounded-xl p-2.5 font-bold text-indigo-950 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
-                />
+                <label className="block font-bold text-slate-700 mb-1">{voucherType === 'income' ? 'يُقبض إلى:' : 'يُدفع من:'}</label>
+                <select
+                  value={cashAccount}
+                  onChange={(e) => setCashAccount(e.target.value as '101' | '102')}
+                  className="w-full border border-slate-300 rounded-xl p-2.5 bg-white font-bold text-slate-800"
+                >
+                  <option value="101">[101] الصندوق الرئيسي (الخزينة)</option>
+                  <option value="102">[102] حساب البنك (المصرف)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">المبلغ (د.ع):</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={amount}
+                    onChange={(e) => setAmount(Number(e.target.value))}
+                    className="w-full border border-slate-300 rounded-xl p-2.5 font-bold text-indigo-950 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">التاريخ:</label>
+                  <input
+                    type="date"
+                    value={voucherDate}
+                    onChange={(e) => setVoucherDate(e.target.value)}
+                    className="w-full border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div>
@@ -466,9 +661,10 @@ export default function AccountantDashboard() {
 
               <button
                 onClick={handleAddVoucher}
-                className="w-full bg-[#1e1b4b] hover:bg-[#312e81] text-white font-bold py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-2"
+                disabled={saving}
+                className="w-full bg-[#1e1b4b] hover:bg-[#312e81] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4 text-sky-400" />
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-sky-400" />}
                 <span>حفظ السند المالي</span>
               </button>
             </div>
@@ -477,33 +673,47 @@ export default function AccountantDashboard() {
           <div className="lg:col-span-2 bg-white rounded-2xl shadow-md border border-slate-200 p-6 space-y-4">
             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2 border-b border-slate-100 pb-3">
               <FileText className="w-4 h-4 text-emerald-600" />
-              <span>سجل السندات المالية والمصاريف</span>
+              <span>سجل السندات المالية ({data?.vouchers.length ?? 0})</span>
             </h3>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-[700px] overflow-y-auto">
               <table className="w-full text-right text-xs">
-                <thead className="bg-[#0f172a] text-white rounded-xl">
+                <thead className="bg-[#0f172a] text-white rounded-xl sticky top-0">
                   <tr>
                     <th className="p-3">نوع السند</th>
-                    <th className="p-3">الفئة</th>
+                    <th className="p-3">البند</th>
                     <th className="p-3">المبلغ</th>
                     <th className="p-3">التفاصيل</th>
-                    <th className="p-3">المحاسب</th>
+                    <th className="p-3">أنشأه</th>
+                    <th className="p-3">التاريخ</th>
+                    <th className="p-3">رقم القيد</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {vouchers.map((v) => (
+                  {!loading && data?.vouchers.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-6 text-center text-slate-500">
+                        لا توجد سندات في هذه الفترة.
+                      </td>
+                    </tr>
+                  )}
+                  {data?.vouchers.map((v) => (
                     <tr key={v.id} className="hover:bg-slate-50 transition">
                       <td className="p-3">
-                        <span className={`font-bold px-2 py-0.5 rounded-md ${v.voucher_type === 'income' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                          }`}>
-                          {v.voucher_type === 'income' ? 'إيراد (قبض)' : 'مصروف (صرف)'}
+                        <span
+                          className={`font-bold px-2 py-0.5 rounded-md ${
+                            v.voucher_type === 'income' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {v.voucher_type === 'income' ? 'قبض' : 'صرف'}
                         </span>
                       </td>
-                      <td className="p-3 font-bold text-slate-800">{v.category}</td>
-                      <td className="p-3 font-extrabold text-slate-900">{v.amount.toLocaleString()} د.ع</td>
+                      <td className="p-3 font-bold text-slate-800">{CATEGORY_LABELS[v.category] ?? v.category}</td>
+                      <td className="p-3 font-extrabold text-slate-900 whitespace-nowrap">{money(v.amount)}</td>
                       <td className="p-3 text-slate-600">{v.description}</td>
                       <td className="p-3 text-slate-500">{v.creator_name}</td>
+                      <td className="p-3 text-slate-500 font-mono whitespace-nowrap">{String(v.voucher_date ?? v.created_at).slice(0, 10)}</td>
+                      <td className="p-3 text-indigo-700 font-mono whitespace-nowrap">{v.entry_number ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>

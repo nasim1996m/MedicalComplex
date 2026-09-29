@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
+use App\Services\Ledger;
 use Illuminate\Support\Facades\DB;
 
 class DoctorController extends ApiController
@@ -63,7 +64,7 @@ class DoctorController extends ApiController
 
         // Record income voucher for Accountant
         $doctor = DB::table('users')->where('id', $request->doctor_id)->first();
-        DB::table('vouchers')->insert([
+        Ledger::recordVoucher([
             'voucher_type' => 'income',
             'category' => 'doctor_income',
             'amount' => $request->fee ?? 25000,
@@ -190,7 +191,7 @@ class DoctorController extends ApiController
                 ]);
 
                 $doctor = DB::table('users')->where('id', $request->doctor_id)->first();
-                DB::table('vouchers')->insert([
+                Ledger::recordVoucher([
                     'voucher_type' => 'income',
                     'category' => 'doctor_income',
                     'amount' => $request->fee ?? 25000,

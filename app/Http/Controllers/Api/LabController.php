@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
+use App\Services\Ledger;
 use Illuminate\Support\Facades\DB;
 
 class LabController extends ApiController
@@ -45,6 +46,9 @@ class LabController extends ApiController
         if (!$labReq) {
             return $this->error('طلب الفحص غير موجود', 404);
         }
+        if ($labReq->status === 'completed') {
+            return $this->error('تم إدخال نتيجة هذا الفحص مسبقاً.', 422);
+        }
 
         $testType = $labReq->test_type_id
             ? DB::table('lab_test_types')->where('id', $labReq->test_type_id)->first()
@@ -59,7 +63,7 @@ class LabController extends ApiController
         ]);
 
         // Record income voucher
-        DB::table('vouchers')->insert([
+        Ledger::recordVoucher([
             'voucher_type' => 'income',
             'category' => 'lab_income',
             'amount' => $testType->price ?? 15000,
