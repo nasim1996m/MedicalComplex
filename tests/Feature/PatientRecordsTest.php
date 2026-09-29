@@ -172,6 +172,14 @@ class PatientRecordsTest extends TestCase
         $found = $this->getJson('/api/v1/patients?q=' . urlencode('هدى') . "&from={$midFrom}&to={$midTo}")->json('data');
         $this->assertSame(['هدى سلمان'], array_column($found, 'name'));
 
+        // A patient registered today without a saved visit still shows up in today's range
+        $registered = $this->postJson('/api/v1/patients', ['name' => 'مريض مسجل بدون كشف', 'age' => 40])
+            ->assertCreated()->json('data');
+        $todayNames = array_column($this->getJson("/api/v1/patients?from={$to}&to={$to}")->json('data'), 'name');
+        $this->assertContains($registered['name'], $todayNames);
+        $this->assertContains(self::PATIENTS[0][0], $todayNames);
+        $this->assertNotContains(self::PATIENTS[3][0], $todayNames);
+
         // Invalid range is rejected
         $this->getJson("/api/v1/patients?from={$to}&to={$from}")->assertStatus(422);
     }

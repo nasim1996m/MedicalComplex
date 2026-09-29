@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
 class PatientController extends ApiController
 {
     /**
-     * Search patients by name, code or phone, optionally only those who visited
-     * between from/to (YYYY-MM-DD). Empty query returns the latest patients.
+     * Search patients by name, code or phone, optionally only those who visited or
+     * were registered between from/to (YYYY-MM-DD). Empty query returns the latest patients.
      */
     public function index(Request $request)
     {
@@ -36,17 +36,24 @@ class PatientController extends ApiController
         $query = DB::table('patients')
             ->select('patients.*', DB::raw('COALESCE(vs.visit_count, 0) as visit_count'), 'vs.last_visit_date');
 
-        // عند تحديد فترة: فقط المرضى الذين راجعوا خلالها
+        $query->leftJoinSub($visitStats, 'vs', 'vs.patient_id', '=', 'patients.id');
+
+        // عند تحديد فترة: المرضى الذين راجعوا خلالها أو تم تسجيلهم خلالها
         if ($from || $to) {
-            $query->joinSub($visitStats, 'vs', 'vs.patient_id', '=', 'patients.id');
-        } else {
-            $query->leftJoinSub($visitStats, 'vs', 'vs.patient_id', '=', 'patients.id');
+            $query->where(function ($w) use ($from, $to) {
+                $w->whereNotNull('vs.patient_id')
+                    ->orWhere(function ($registered) use ($from, $to) {
+                        $registered
+                            ->when($from, fn ($q) => $q->whereDate('patients.created_at', '>=', $from))
+                            ->when($to, fn ($q) => $q->whereDate('patients.created_at', '<=', $to));
+                    });
+            });
         }
 
         $this->applySearch($query, (string) $request->query('q', ''));
 
         $patients = $query
-            ->orderByDesc(DB::raw('COALESCE(vs.last_visit_date, patients.updated_at)'))
+            ->orderByDesc(DB::raw('COALESCE(vs.last_visit_date, patients.created_at)'))
             ->orderByDesc('patients.id')
             ->limit(200)
             ->get()

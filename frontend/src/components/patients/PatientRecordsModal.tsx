@@ -206,7 +206,7 @@ function RecordsDialog({ onClose, initialQuery = '', onSelectPatient }: Omit<Pro
               <div className="space-y-2">
                 <p className="text-xs text-slate-500 font-bold">
                   {rangeActive
-                    ? `${results.length} مريض راجعوا ${from ? `من ${from}` : ''} ${to ? `إلى ${to}` : ''}`
+                    ? `${results.length} مريض سُجلوا أو راجعوا ${from ? `من ${from}` : ''} ${to ? `إلى ${to}` : ''}`
                     : `${results.length} مريض`}
                 </p>
                 <div className="overflow-x-auto">
@@ -247,7 +247,11 @@ function RecordsDialog({ onClose, initialQuery = '', onSelectPatient }: Omit<Pro
               </div>
             ) : (
               searched && !error && (
-                <p className="text-xs text-rose-600 py-6 text-center">لم يتم العثور على مريض مطابق في السجل المشترك.</p>
+                <p className="text-xs text-rose-600 py-6 text-center leading-relaxed">
+                  {rangeActive
+                    ? 'لا يوجد مرضى تم تسجيلهم أو راجعوا خلال هذه الفترة.'
+                    : 'لم يتم العثور على مريض مطابق في السجل المشترك.'}
+                </p>
               )
             )}
           </>
