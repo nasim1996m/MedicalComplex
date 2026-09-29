@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\ArabicText;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -11,25 +12,123 @@ use Illuminate\Support\Facades\DB;
 class PatientController extends ApiController
 {
     /**
-     * Search patients by name, code or phone (empty query returns latest patients)
+     * Search patients by name, code or phone, optionally only those who visited
+     * between from/to (YYYY-MM-DD). Empty query returns the latest patients.
      */
     public function index(Request $request)
     {
-        $q = trim((string) $request->query('q', ''));
+        $request->validate([
+            'q'    => 'nullable|string|max:255',
+            'from' => 'nullable|date',
+            'to'   => 'nullable|date|after_or_equal:from',
+        ]);
 
-        $patients = DB::table('patients')
-            ->when($q !== '', function ($query) use ($q) {
-                $query->where(function ($w) use ($q) {
-                    $w->where('name', 'like', '%' . $q . '%')
-                        ->orWhere('patient_code', 'like', '%' . $q . '%')
-                        ->orWhere('phone', 'like', '%' . $q . '%');
-                });
-            })
-            ->orderBy('updated_at', 'desc')
-            ->limit(50)
-            ->get();
+        $from = $request->query('from');
+        $to   = $request->query('to');
+
+        // عدد الزيارات وتاريخ آخر زيارة (ضمن الفترة إن وُجدت)
+        $visitStats = DB::table('visits')
+            ->select('patient_id', DB::raw('COUNT(*) as visit_count'), DB::raw('MAX(visit_date) as last_visit_date'))
+            ->when($from, fn ($q) => $q->whereDate('visit_date', '>=', $from))
+            ->when($to, fn ($q) => $q->whereDate('visit_date', '<=', $to))
+            ->groupBy('patient_id');
+
+        $query = DB::table('patients')
+            ->select('patients.*', DB::raw('COALESCE(vs.visit_count, 0) as visit_count'), 'vs.last_visit_date');
+
+        // عند تحديد فترة: فقط المرضى الذين راجعوا خلالها
+        if ($from || $to) {
+            $query->joinSub($visitStats, 'vs', 'vs.patient_id', '=', 'patients.id');
+        } else {
+            $query->leftJoinSub($visitStats, 'vs', 'vs.patient_id', '=', 'patients.id');
+        }
+
+        $this->applySearch($query, (string) $request->query('q', ''));
+
+        $patients = $query
+            ->orderByDesc(DB::raw('COALESCE(vs.last_visit_date, patients.updated_at)'))
+            ->orderByDesc('patients.id')
+            ->limit(200)
+            ->get()
+            ->map(function ($patient) {
+                unset($patient->search_name);
+                return $patient;
+            });
 
         return $this->success($patients, 'نتائج البحث في سجل المرضى');
+    }
+
+    /**
+     * Visits (المراجعين) between two dates with patient & doctor names
+     */
+    public function visits(Request $request)
+    {
+        $request->validate([
+            'q'         => 'nullable|string|max:255',
+            'from'      => 'nullable|date',
+            'to'        => 'nullable|date|after_or_equal:from',
+            'doctor_id' => 'nullable|integer',
+        ]);
+
+        $from = $request->query('from');
+        $to   = $request->query('to');
+
+        $query = DB::table('visits')
+            ->join('patients', 'visits.patient_id', '=', 'patients.id')
+            ->leftJoin('users', 'visits.doctor_id', '=', 'users.id')
+            ->select(
+                'visits.*',
+                'patients.name as patient_name',
+                'patients.patient_code',
+                'patients.age',
+                'patients.gender',
+                'patients.phone',
+                'users.name as doctor_name',
+                'users.specialty as doctor_specialty'
+            )
+            ->when($from, fn ($q) => $q->whereDate('visits.visit_date', '>=', $from))
+            ->when($to, fn ($q) => $q->whereDate('visits.visit_date', '<=', $to))
+            ->when($request->query('doctor_id'), fn ($q, $doctorId) => $q->where('visits.doctor_id', $doctorId));
+
+        $this->applySearch($query, (string) $request->query('q', ''));
+
+        $visits = $query
+            ->orderByDesc('visits.visit_date')
+            ->orderByDesc('visits.id')
+            ->limit(500)
+            ->get();
+
+        return $this->success([
+            'from'           => $from,
+            'to'             => $to,
+            'total_visits'   => $visits->count(),
+            'total_patients' => $visits->pluck('patient_id')->unique()->count(),
+            'visits'         => $visits,
+        ], 'قائمة المراجعين خلال الفترة');
+    }
+
+    /**
+     * Every word of the query must match the (normalized) name, or the whole
+     * query must match the patient code or phone.
+     */
+    private function applySearch($query, string $q): void
+    {
+        $q = trim($q);
+        if ($q === '') {
+            return;
+        }
+
+        $words = array_filter(explode(' ', ArabicText::normalize($q)));
+
+        $query->where(function ($w) use ($q, $words) {
+            $w->where(function ($nameQuery) use ($words) {
+                foreach ($words as $word) {
+                    $nameQuery->where('patients.search_name', 'like', '%' . $word . '%');
+                }
+            })
+                ->orWhere('patients.patient_code', 'like', '%' . $q . '%')
+                ->orWhere('patients.phone', 'like', '%' . $q . '%');
+        });
     }
 
     /**
@@ -117,6 +216,7 @@ class PatientController extends ApiController
         $id = DB::table('patients')->insertGetId([
             'patient_code'    => $code,
             'name'            => $data['name'],
+            'search_name'     => ArabicText::normalize($data['name']),
             'age'             => $data['age'],
             'gender'          => $data['gender'] ?? 'male',
             'phone'           => $data['phone'] ?? null,

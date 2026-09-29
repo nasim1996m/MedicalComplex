@@ -31,6 +31,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/patients', [PatientController::class, 'index']);
     Route::post('/patients', [PatientController::class, 'store']);
     Route::get('/patients/{id}/history', [PatientController::class, 'history']);
+    Route::get('/visits', [PatientController::class, 'visits']);
 
     // Doctor Routes
     Route::get('/doctor/dashboard', [DoctorController::class, 'dashboard']);
