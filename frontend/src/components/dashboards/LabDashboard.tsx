@@ -1,56 +1,82 @@
 'use client';
 
-import React, { useState } from 'react';
-import { mockData } from '@/services/api';
+import React, { useCallback, useEffect, useState } from 'react';
 import { LabRequest, InventoryItem } from '@/types/medical';
+import { useAuth } from '@/context/AuthContext';
+import { completeLabRequest, getLabDashboard } from '@/services/medicalApi';
+import PatientRecordsModal from '@/components/patients/PatientRecordsModal';
 import {
   FlaskConical,
   CheckCircle2,
   Upload,
   Boxes,
   FileText,
-  AlertTriangle,
-  Send,
-  Clock,
   Activity,
+  Loader2,
+  AlertTriangle,
+  Search,
 } from 'lucide-react';
 
 export default function LabDashboard() {
-  const [labRequests, setLabRequests] = useState<LabRequest[]>(mockData.labRequests);
-  const [consumables, setConsumables] = useState<InventoryItem[]>(mockData.inventoryItems);
+  const { user } = useAuth();
+  const [labRequests, setLabRequests] = useState<LabRequest[]>([]);
+  const [consumables, setConsumables] = useState<InventoryItem[]>([]);
   const [selectedReq, setSelectedReq] = useState<LabRequest | null>(null);
   const [resultInput, setResultInput] = useState('');
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
 
   const showNotification = (msg: string) => {
     setNotificationMsg(msg);
     setTimeout(() => setNotificationMsg(null), 3500);
   };
 
-  const handleCompleteTest = () => {
-    if (!selectedReq || !resultInput) return;
+  const loadDashboard = useCallback(async () => {
+    try {
+      const data = await getLabDashboard();
+      setLabRequests(data.lab_requests);
+      setConsumables(data.consumables);
+      setErrorMsg(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل تحميل طلبات المختبر');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    setLabRequests((prev) =>
-      prev.map((req) =>
-        req.id === selectedReq.id
-          ? {
-              ...req,
-              status: 'completed',
-              result_summary: resultInput,
-              report_file_url: '/reports/result_generated.pdf',
-            }
-          : req
-      )
-    );
+  useEffect(() => {
+    let cancelled = false;
+    getLabDashboard()
+      .then((data) => {
+        if (cancelled) return;
+        setLabRequests(data.lab_requests);
+        setConsumables(data.consumables);
+      })
+      .catch((err) => !cancelled && setErrorMsg(err instanceof Error ? err.message : 'فشل تحميل طلبات المختبر'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    // Deduct consumable needle/cotton simulation
-    setConsumables((prev) =>
-      prev.map((c) => (c.id === 2 ? { ...c, quantity: Math.max(0, c.quantity - 1) } : c))
-    );
+  const handleCompleteTest = async () => {
+    if (!selectedReq || !resultInput.trim() || !user) return;
 
-    setSelectedReq(null);
-    setResultInput('');
-    showNotification('تم حفظ نتيجة الفحص ورفع التقرير وإتاحتها فوراً للطبيب والصيدلية!');
+    setSaving(true);
+    try {
+      await completeLabRequest(selectedReq.id, user.id, resultInput.trim());
+      setSelectedReq(null);
+      setResultInput('');
+      showNotification('تم حفظ نتيجة الفحص في السجل الطبي وإتاحتها فوراً للطبيب والصيدلية!');
+      await loadDashboard();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل حفظ النتيجة');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -59,6 +85,13 @@ export default function LabDashboard() {
         <div className="bg-emerald-900/90 text-emerald-100 p-4 rounded-2xl border border-emerald-500/40 shadow-xl flex items-center gap-3 animate-in fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-400" />
           <p className="text-xs font-bold">{notificationMsg}</p>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="bg-rose-50 text-rose-800 p-4 rounded-2xl border border-rose-200 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+          <p className="text-xs font-bold">{errorMsg}</p>
         </div>
       )}
 
@@ -74,11 +107,20 @@ export default function LabDashboard() {
           </div>
         </div>
 
+        <div className="flex items-center gap-3">
+        <button
+          onClick={() => setShowRecords(true)}
+          className="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
+        >
+          <Search className="w-4 h-4" />
+          <span>السجل المشترك للمرضى</span>
+        </button>
         <div className="bg-indigo-950/80 px-4 py-2 rounded-xl border border-indigo-800/40 text-xs text-indigo-200">
           <span>الطلبات المعلقة: </span>
           <span className="font-bold text-amber-400">
             {labRequests.filter((l) => l.status === 'pending').length} فحص
           </span>
+        </div>
         </div>
       </div>
 
@@ -91,6 +133,14 @@ export default function LabDashboard() {
           </h3>
 
           <div className="space-y-3">
+            {loading && (
+              <div className="py-6 flex justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+              </div>
+            )}
+            {!loading && labRequests.length === 0 && (
+              <p className="text-xs text-slate-500 text-center py-6">لا توجد طلبات فحص واردة حالياً.</p>
+            )}
             {labRequests.map((req) => (
               <div key={req.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="space-y-1">
@@ -102,7 +152,8 @@ export default function LabDashboard() {
                     <span className="text-[11px] text-slate-500">الطبيب: {req.doctor_name}</span>
                   </div>
                   <p className="text-xs font-bold text-sky-700 pt-1">
-                    نوع الفحص: {req.test_name} ({req.test_price?.toLocaleString()} د.ع)
+                    نوع الفحص: {req.test_name}
+                    {req.test_price ? ` (${Number(req.test_price).toLocaleString()} د.ع)` : ''}
                   </p>
                   {req.result_summary && (
                     <p className="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded-lg border border-emerald-200 font-medium">
@@ -121,14 +172,10 @@ export default function LabDashboard() {
                       <span>إدخال النتيجة ورفع التقرير</span>
                     </button>
                   ) : (
-                    <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); alert('تحميل ملف PDF النتيجة المرفع بالم المنظومة'); }}
-                      className="bg-emerald-100 text-emerald-800 hover:bg-emerald-200 text-xs font-bold px-3 py-2 rounded-xl transition flex items-center gap-1.5"
-                    >
+                    <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5">
                       <FileText className="w-4 h-4" />
-                      <span>عرض تقرير الـ PDF</span>
-                    </a>
+                      <span>تم إدخال النتيجة</span>
+                    </span>
                   )}
                 </div>
               </div>
@@ -191,15 +238,17 @@ export default function LabDashboard() {
               </div>
               <button
                 onClick={handleCompleteTest}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-2"
+                disabled={saving || !resultInput.trim()}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4" />
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                 <span>حفظ ورفع التقرير نهائياً</span>
               </button>
             </div>
           </div>
         </div>
       )}
+      <PatientRecordsModal open={showRecords} onClose={() => setShowRecords(false)} />
     </div>
   );
 }

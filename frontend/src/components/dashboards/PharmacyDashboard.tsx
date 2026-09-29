@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { mockData } from '@/services/api';
 import { Prescription, Medicine } from '@/types/medical';
+import { useAuth } from '@/context/AuthContext';
+import { dispensePrescription, getPharmacyDashboard } from '@/services/medicalApi';
+import PatientRecordsModal from '@/components/patients/PatientRecordsModal';
 import {
   Pill,
   CheckCircle2,
@@ -10,37 +13,65 @@ import {
   Boxes,
   Send,
   Clock,
-  DollarSign,
-  Calendar,
+  Loader2,
+  Search,
 } from 'lucide-react';
 
 export default function PharmacyDashboard() {
-  const [prescriptions, setPrescriptions] = useState<Prescription[]>(mockData.prescriptions);
-  const [medicines, setMedicines] = useState<Medicine[]>(mockData.medicines);
+  const { user } = useAuth();
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [dispensingId, setDispensingId] = useState<number | null>(null);
+  const [showRecords, setShowRecords] = useState(false);
 
   const showNotification = (msg: string) => {
     setNotificationMsg(msg);
     setTimeout(() => setNotificationMsg(null), 3500);
   };
 
-  const handleDispense = (id: number) => {
-    setPrescriptions((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, status: 'dispensed' } : p))
-    );
+  const loadDashboard = useCallback(async () => {
+    try {
+      const data = await getPharmacyDashboard();
+      setPrescriptions(data.prescriptions);
+      setMedicines(data.medicines);
+      setErrorMsg(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل تحميل الوصفات');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    // Deduct quantity in medicines & add income voucher to mockData
-    setMedicines((prev) =>
-      prev.map((m) => {
-        if (m.id === 2) {
-          const newQty = Math.max(0, m.quantity - 1);
-          return { ...m, quantity: newQty };
-        }
-        return m;
+  useEffect(() => {
+    let cancelled = false;
+    getPharmacyDashboard()
+      .then((data) => {
+        if (cancelled) return;
+        setPrescriptions(data.prescriptions);
+        setMedicines(data.medicines);
       })
-    );
+      .catch((err) => !cancelled && setErrorMsg(err instanceof Error ? err.message : 'فشل تحميل الوصفات'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    showNotification('تم صرف الوصفة الطبية وتحديث الكمية بالمخزن وتسجيل الإيراد للمحاسبة!');
+  const handleDispense = async (id: number) => {
+    if (!user) return;
+    setDispensingId(id);
+    try {
+      await dispensePrescription(id, user.id);
+      showNotification('تم صرف الوصفة الطبية وتحديث المخزون وتسجيل الإيراد للمحاسبة!');
+      await loadDashboard();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'فشل صرف الوصفة');
+    } finally {
+      setDispensingId(null);
+    }
   };
 
   const handleAlertAdminStock = (medName: string, qty: number) => {
@@ -65,6 +96,13 @@ export default function PharmacyDashboard() {
         </div>
       )}
 
+      {errorMsg && (
+        <div className="bg-rose-50 text-rose-800 p-4 rounded-2xl border border-rose-200 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+          <p className="text-xs font-bold">{errorMsg}</p>
+        </div>
+      )}
+
       {/* Pharmacy Banner Header */}
       <div className="bg-gradient-to-r from-[#1e1b4b] via-[#312e81] to-[#0f172a] text-white p-6 rounded-2xl shadow-xl flex items-center justify-between border border-indigo-900/60">
         <div className="flex items-center gap-4">
@@ -77,11 +115,20 @@ export default function PharmacyDashboard() {
           </div>
         </div>
 
+        <div className="flex items-center gap-3">
+        <button
+          onClick={() => setShowRecords(true)}
+          className="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
+        >
+          <Search className="w-4 h-4" />
+          <span>السجل المشترك للمرضى</span>
+        </button>
         <div className="bg-indigo-950/80 px-4 py-2 rounded-xl border border-indigo-800/40 text-xs text-indigo-200">
           <span>الوصفات المعلقة: </span>
           <span className="font-bold text-amber-400">
             {prescriptions.filter((p) => p.status === 'pending').length} وصفة
           </span>
+        </div>
         </div>
       </div>
 
@@ -93,6 +140,14 @@ export default function PharmacyDashboard() {
         </h3>
 
         <div className="space-y-4">
+          {loading && (
+            <div className="py-6 flex justify-center">
+              <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+            </div>
+          )}
+          {!loading && prescriptions.length === 0 && (
+            <p className="text-xs text-slate-500 text-center py-6">لا توجد وصفات واردة حالياً.</p>
+          )}
           {prescriptions.map((rx) => (
             <div key={rx.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="space-y-1">
@@ -119,14 +174,15 @@ export default function PharmacyDashboard() {
                 {rx.status === 'pending' ? (
                   <button
                     onClick={() => handleDispense(rx.id)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-1.5"
+                    disabled={dispensingId === rx.id}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition flex items-center gap-1.5"
                   >
-                    <CheckCircle2 className="w-4 h-4" />
+                    {dispensingId === rx.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                     <span>تجهيز وصرف الدواء للمريض</span>
                   </button>
                 ) : (
                   <span className="bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl">
-                    تم الصرف والمكافأة
+                    تم الصرف
                   </span>
                 )}
               </div>
@@ -160,7 +216,7 @@ export default function PharmacyDashboard() {
                   <tr key={med.id} className="hover:bg-slate-50 transition">
                     <td className="p-3 font-bold text-slate-800">{med.name}</td>
                     <td className="p-3 text-slate-600">{med.category}</td>
-                    <td className="p-3 font-bold text-emerald-700">{med.unit_price.toLocaleString()} د.ع</td>
+                    <td className="p-3 font-bold text-emerald-700">{Number(med.unit_price).toLocaleString()} د.ع</td>
                     <td className="p-3">
                       <span className={`font-bold px-2.5 py-1 rounded-lg ${
                         med.quantity <= med.min_threshold
@@ -212,6 +268,7 @@ export default function PharmacyDashboard() {
           </div>
         </div>
       </div>
+      <PatientRecordsModal open={showRecords} onClose={() => setShowRecords(false)} />
     </div>
   );
 }

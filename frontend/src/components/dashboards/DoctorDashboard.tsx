@@ -1,39 +1,48 @@
 'use client';
 
-import React, { useState } from 'react';
-import { mockData } from '@/services/api';
-import { Patient, Visit, LabRequest, Prescription } from '@/types/medical';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Patient } from '@/types/medical';
+import { useAuth } from '@/context/AuthContext';
+import { createPatient, saveConsultation, searchPatients, todayISO } from '@/services/medicalApi';
+import PatientRecordsModal from '@/components/patients/PatientRecordsModal';
 import {
   Stethoscope,
   Activity,
-  FileText,
   Search,
   Plus,
-  Send,
   FlaskConical,
   Pill,
   CheckCircle2,
-  Clock,
   User,
   UserPlus,
-  HeartPulse,
+  CalendarRange,
+  Loader2,
+  AlertTriangle,
+  X,
+  Save,
 } from 'lucide-react';
 
 export default function DoctorDashboard() {
-  const [patients, setPatients] = useState<Patient[]>(mockData.patients);
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(mockData.patients[0]);
+  const { user } = useAuth();
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [diagnosisInput, setDiagnosisInput] = useState('');
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Add Patient Modal State
   const [showAddPatientModal, setShowAddPatientModal] = useState(false);
   const [newPatientName, setNewPatientName] = useState('');
   const [newPatientAge, setNewPatientAge] = useState<number>(30);
   const [newPatientGender, setNewPatientGender] = useState<'male' | 'female'>('male');
+  const [newPatientPhone, setNewPatientPhone] = useState('');
   const [newPatientHistory, setNewPatientHistory] = useState('');
   const [newPatientDiagnosis, setNewPatientDiagnosis] = useState('');
 
   // Manual Text Inputs requested by Doctor
   const [manualTestName, setManualTestName] = useState('');
+  const [labItems, setLabItems] = useState<{ test_name: string }[]>([]);
   const [manualMedicineName, setManualMedicineName] = useState('');
   const [dosage, setDosage] = useState('كبسولة كل 8 ساعات');
   const [duration, setDuration] = useState('7 أيام');
@@ -41,104 +50,136 @@ export default function DoctorDashboard() {
 
   const [searchHistoryQuery, setSearchHistoryQuery] = useState('');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [historyResult, setHistoryResult] = useState<Patient | null>(null);
+  const [modalQuery, setModalQuery] = useState('');
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
   const showNotification = (msg: string) => {
     setNotificationMsg(msg);
-    setTimeout(() => setNotificationMsg(null), 3500);
+    setTimeout(() => setNotificationMsg(null), 4000);
   };
 
-  const handleCreatePatient = (e: React.FormEvent) => {
+  const showError = (err: unknown) => {
+    setErrorMsg(err instanceof Error ? err.message : 'حدث خطأ غير متوقع');
+  };
+
+  // قائمة مراجعي اليوم من قاعدة البيانات
+  const applyTodayPatients = useCallback((list: Patient[]) => {
+    setPatients((prev) => {
+      // keep patients opened in this session that have no visit today yet
+      const extra = prev.filter((p) => !list.some((l) => l.id === p.id));
+      return [...extra, ...list];
+    });
+    setSelectedPatient((current) => current ?? list[0] ?? null);
+  }, []);
+
+  const loadTodayPatients = useCallback(
+    () => searchPatients({ from: todayISO(), to: todayISO() }).then(applyTodayPatients),
+    [applyTodayPatients]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    searchPatients({ from: todayISO(), to: todayISO() })
+      .then((list) => !cancelled && applyTodayPatients(list))
+      .catch((err) => !cancelled && showError(err))
+      .finally(() => !cancelled && setLoadingPatients(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [applyTodayPatients]);
+
+  const openPatient = (patient: Patient) => {
+    setPatients((prev) => (prev.some((p) => p.id === patient.id) ? prev : [patient, ...prev]));
+    setSelectedPatient(patient);
+  };
+
+  const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPatientName.trim()) return;
 
-    const newPatient: Patient = {
-      id: Date.now(),
-      patient_code: `PAT-100${patients.length + 1}`,
-      name: newPatientName,
-      gender: newPatientGender,
-      age: newPatientAge,
-      medical_history: newPatientHistory,
-    };
+    setSaving(true);
+    try {
+      const newPatient = await createPatient({
+        name: newPatientName.trim(),
+        age: newPatientAge,
+        gender: newPatientGender,
+        phone: newPatientPhone.trim() || undefined,
+        medical_history: newPatientHistory.trim() || undefined,
+      });
 
-    setPatients((prev) => [newPatient, ...prev]);
-    setSelectedPatient(newPatient);
-    setDiagnosisInput(newPatientDiagnosis);
+      openPatient(newPatient);
+      setDiagnosisInput(newPatientDiagnosis);
+      setLabItems([]);
+      setPrescriptionItems([]);
 
-    setNewPatientName('');
-    setNewPatientHistory('');
-    setNewPatientDiagnosis('');
-    setShowAddPatientModal(false);
+      setNewPatientName('');
+      setNewPatientPhone('');
+      setNewPatientHistory('');
+      setNewPatientDiagnosis('');
+      setShowAddPatientModal(false);
+      setErrorMsg(null);
 
-    showNotification(`تم تسديد وتسجيل المريض الجديد (${newPatient.name}) بكود ${newPatient.patient_code} بنجاح!`);
+      showNotification(`تم تسجيل المريض (${newPatient.name}) في قاعدة البيانات بكود ${newPatient.patient_code}. أكمل التشخيص ثم اضغط "حفظ الكشف".`);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleAddMedicineToRx = () => {
     if (!manualMedicineName.trim()) return;
-    setPrescriptionItems((prev) => [
-      ...prev,
-      { medicine_name: manualMedicineName, dosage, duration },
-    ]);
+    setPrescriptionItems((prev) => [...prev, { medicine_name: manualMedicineName.trim(), dosage, duration }]);
     setManualMedicineName('');
   };
 
-  const handleSendPrescription = () => {
-    if (!selectedPatient || prescriptionItems.length === 0) return;
-
-    const newRx: Prescription = {
-      id: Date.now(),
-      visit_id: 1,
-      doctor_id: 2,
-      doctor_name: 'د. أحمد علي السامرائي',
-      patient_id: selectedPatient.id,
-      patient_name: selectedPatient.name,
-      patient_code: selectedPatient.patient_code,
-      status: 'pending',
-      items: prescriptionItems.map((item, idx) => ({
-        medicine_id: idx + 1,
-        medicine_name: item.medicine_name,
-        dosage: item.dosage,
-        duration: item.duration,
-      })),
-      created_at: new Date().toLocaleTimeString('ar-SA'),
-    };
-
-    mockData.prescriptions.unshift(newRx);
-    setPrescriptionItems([]);
-    showNotification('تم إرسال الوصفة الطبية المكتوبة يدوياً بفرز فوري إلى الصيدلية بنجاح!');
-  };
-
-  const handleOrderLabTest = () => {
-    if (!selectedPatient || !manualTestName.trim()) return;
-
-    const newReq: LabRequest = {
-      id: Date.now(),
-      visit_id: 1,
-      patient_id: selectedPatient.id,
-      patient_name: selectedPatient.name,
-      patient_code: selectedPatient.patient_code,
-      age: selectedPatient.age,
-      doctor_id: 2,
-      doctor_name: 'د. أحمد علي السامرائي',
-      test_type_id: 1,
-      test_name: manualTestName,
-      test_category: 'blood',
-      test_price: 15000,
-      status: 'pending',
-      created_at: new Date().toLocaleTimeString('ar-SA'),
-    };
-
-    mockData.labRequests.unshift(newReq);
-    showNotification(`تم إرسال طلب فحص (${manualTestName}) المكتوب يدوياً إلى قسم المختبر والأشعة والتخطيط بنجاح!`);
+  const handleAddLabTest = () => {
+    if (!manualTestName.trim()) return;
+    setLabItems((prev) => [...prev, { test_name: manualTestName.trim() }]);
     setManualTestName('');
   };
 
-  const handleSearchPatientHistory = () => {
-    const found = patients.find(
-      (p) => p.name.includes(searchHistoryQuery) || p.patient_code.includes(searchHistoryQuery)
-    );
-    setHistoryResult(found || null);
+  // حفظ الكشف + التحاليل + الوصفة في قاعدة البيانات دفعة واحدة
+  const handleSaveConsultation = async () => {
+    if (!selectedPatient) return;
+    if (!user) {
+      setErrorMsg('يجب تسجيل الدخول أولاً');
+      return;
+    }
+    if (!diagnosisInput.trim()) {
+      setErrorMsg('اكتب التشخيص الطبي قبل حفظ الكشف.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await saveConsultation({
+        doctor_id: user.id,
+        patient_id: selectedPatient.id,
+        diagnosis: diagnosisInput.trim(),
+        lab_requests: labItems,
+        prescription_items: prescriptionItems,
+      });
+
+      const parts = ['تم حفظ الكشف في السجل الطبي'];
+      if (result.lab_request_ids.length) parts.push(`وإرسال ${result.lab_request_ids.length} فحص للمختبر`);
+      if (result.prescription_id) parts.push('وإرسال الوصفة للصيدلية');
+      showNotification(`${parts.join(' ')} للمريض ${selectedPatient.name}.`);
+
+      setDiagnosisInput('');
+      setLabItems([]);
+      setPrescriptionItems([]);
+      setErrorMsg(null);
+      await loadTodayPatients();
+    } catch (err) {
+      showError(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openRecords = (query: string) => {
+    setModalQuery(query);
     setShowHistoryModal(true);
   };
 
@@ -148,6 +189,18 @@ export default function DoctorDashboard() {
         <div className="bg-emerald-900/90 text-emerald-100 p-4 rounded-2xl border border-emerald-500/40 shadow-xl flex items-center gap-3 animate-in fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-400" />
           <p className="text-xs font-bold">{notificationMsg}</p>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="bg-rose-50 text-rose-800 p-4 rounded-2xl border border-rose-200 shadow flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            <p className="text-xs font-bold">{errorMsg}</p>
+          </div>
+          <button onClick={() => setErrorMsg(null)} className="text-rose-400 hover:text-rose-700">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -179,14 +232,25 @@ export default function DoctorDashboard() {
               placeholder="بحث في سجل مريض سابق (الاسم أو الكود)..."
               value={searchHistoryQuery}
               onChange={(e) => setSearchHistoryQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') openRecords(searchHistoryQuery);
+              }}
               className="bg-indigo-950/80 border border-indigo-700/50 text-white text-xs px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400 w-full md:w-64"
             />
             <button
-              onClick={handleSearchPatientHistory}
+              onClick={() => openRecords(searchHistoryQuery)}
               className="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shrink-0"
             >
               <Search className="w-4 h-4" />
               <span>السجل المشترك</span>
+            </button>
+            <button
+              onClick={() => openRecords('')}
+              title="البحث عن المراجعين خلال فترة (من تاريخ - إلى تاريخ)"
+              className="bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shrink-0"
+            >
+              <CalendarRange className="w-4 h-4" />
+              <span>المراجعون حسب الفترة</span>
             </button>
           </div>
         </div>
@@ -205,6 +269,18 @@ export default function DoctorDashboard() {
             </span>
           </h3>
           <div className="space-y-3">
+            {loadingPatients && (
+              <div className="py-6 flex justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+              </div>
+            )}
+            {!loadingPatients && patients.length === 0 && (
+              <p className="text-xs text-slate-500 text-center py-6 leading-relaxed">
+                لا يوجد مراجعون اليوم بعد.
+                <br />
+                أضف مريضاً جديداً أو ابحث في السجل المشترك لفتح مريض سابق.
+              </p>
+            )}
             {patients.map((patient) => (
               <div
                 key={patient.id}
@@ -223,7 +299,7 @@ export default function DoctorDashboard() {
                     </p>
                   </div>
                   <span className="text-[10px] bg-sky-500/20 text-sky-400 font-bold px-2 py-0.5 rounded-md">
-                    جاهز للفحص
+                    {patient.visit_count ? `${patient.visit_count} كشف اليوم` : 'جاهز للفحص'}
                   </span>
                 </div>
                 {patient.medical_history && (
@@ -242,10 +318,10 @@ export default function DoctorDashboard() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                 <Activity className="w-4 h-4 text-emerald-600" />
-                <span>تشخيص حالة المريض: {selectedPatient?.name}</span>
+                <span>تشخيص حالة المريض: {selectedPatient?.name ?? 'اختر مريضاً من القائمة'}</span>
               </h3>
               <span className="text-xs bg-indigo-100 text-indigo-900 font-bold px-3 py-1 rounded-full">
-                كود: {selectedPatient?.patient_code}
+                كود: {selectedPatient?.patient_code ?? '—'}
               </span>
             </div>
 
@@ -277,11 +353,11 @@ export default function DoctorDashboard() {
                     className="w-full border border-slate-300 rounded-xl p-2.5 bg-white text-xs font-bold text-slate-900 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
                   />
                   <button
-                    onClick={handleOrderLabTest}
+                    onClick={handleAddLabTest}
                     className="w-full bg-[#1e1b4b] hover:bg-[#312e81] text-white font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-md"
                   >
-                    <Send className="w-3.5 h-3.5 text-sky-400" />
-                    <span>إرسال الطلب للمختبر والأشعة</span>
+                    <Plus className="w-3.5 h-3.5 text-sky-400" />
+                    <span>إضافة الفحص لطلب المختبر والأشعة</span>
                   </button>
                 </div>
 
@@ -324,27 +400,58 @@ export default function DoctorDashboard() {
                 </div>
               </div>
 
-              {/* Prescription Items Preview & Send */}
-              {prescriptionItems.length > 0 && (
-                <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl space-y-2">
-                  <h4 className="font-bold text-indigo-900 text-xs">قائمة الأدوية المكتوبة يدوياً بالوصفة الحالية:</h4>
-                  <ul className="space-y-1">
-                    {prescriptionItems.map((item, idx) => (
-                      <li key={idx} className="flex justify-between items-center text-xs text-indigo-950 bg-white p-2 rounded-lg border">
-                        <span className="font-bold">{item.medicine_name}</span>
-                        <span className="text-slate-600">{item.dosage} - {item.duration}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <button
-                    onClick={handleSendPrescription}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl transition text-xs flex items-center justify-center gap-2 shadow-md mt-2"
-                  >
-                    <Send className="w-4 h-4" />
-                    <span>إرسال الوصفة للصيدلية فوراً</span>
-                  </button>
+              {/* Lab & Prescription Preview */}
+              {(labItems.length > 0 || prescriptionItems.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {labItems.length > 0 && (
+                    <div className="bg-sky-50 border border-sky-200 p-4 rounded-xl space-y-2">
+                      <h4 className="font-bold text-sky-900 text-xs">الفحوصات المطلوبة ({labItems.length}):</h4>
+                      <ul className="space-y-1">
+                        {labItems.map((item, idx) => (
+                          <li key={idx} className="flex justify-between items-center text-xs text-sky-950 bg-white p-2 rounded-lg border">
+                            <span className="font-bold">{item.test_name}</span>
+                            <button onClick={() => setLabItems((prev) => prev.filter((_, i) => i !== idx))} className="text-rose-500 hover:text-rose-700">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {prescriptionItems.length > 0 && (
+                    <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl space-y-2">
+                      <h4 className="font-bold text-indigo-900 text-xs">أدوية الوصفة ({prescriptionItems.length}):</h4>
+                      <ul className="space-y-1">
+                        {prescriptionItems.map((item, idx) => (
+                          <li key={idx} className="flex justify-between items-center gap-2 text-xs text-indigo-950 bg-white p-2 rounded-lg border">
+                            <span className="font-bold">{item.medicine_name}</span>
+                            <span className="text-slate-600 flex items-center gap-2">
+                              {item.dosage} - {item.duration}
+                              <button onClick={() => setPrescriptionItems((prev) => prev.filter((_, i) => i !== idx))} className="text-rose-500 hover:text-rose-700">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Save everything to the database */}
+              <button
+                onClick={handleSaveConsultation}
+                disabled={!selectedPatient || saving}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-md"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                <span>
+                  حفظ الكشف في السجل
+                  {labItems.length > 0 ? ' + إرسال الفحوصات للمختبر' : ''}
+                  {prescriptionItems.length > 0 ? ' + إرسال الوصفة للصيدلية' : ''}
+                </span>
+              </button>
             </div>
           </div>
         </div>
@@ -404,6 +511,17 @@ export default function DoctorDashboard() {
               </div>
 
               <div>
+                <label className="block font-bold text-slate-700 mb-1">رقم الهاتف (يساعد في البحث لاحقاً):</label>
+                <input
+                  type="tel"
+                  placeholder="مثال: 07701234567"
+                  value={newPatientPhone}
+                  onChange={(e) => setNewPatientPhone(e.target.value)}
+                  className="w-full border border-slate-300 rounded-xl p-2.5 bg-white font-mono focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
                 <label className="block font-bold text-slate-700 mb-1">تاريخ المرض والأمراض المزمنة السابقة (إن وجد):</label>
                 <input
                   type="text"
@@ -427,9 +545,10 @@ export default function DoctorDashboard() {
 
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 text-xs mt-2"
+                disabled={saving}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 text-xs mt-2"
               >
-                <CheckCircle2 className="w-4 h-4" />
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                 <span>حفظ وتأكيد تسجيل المريض جديد</span>
               </button>
             </form>
@@ -437,40 +556,13 @@ export default function DoctorDashboard() {
         </div>
       )}
 
-      {/* History Shared Modal */}
-      {showHistoryModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl border border-indigo-900/40 text-right">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-                <FileText className="w-5 h-5 text-indigo-600" />
-                <span>السجل الطبي التشاركي للمريض</span>
-              </h3>
-              <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-slate-600 text-sm font-bold">
-                ✕ إغلاق
-              </button>
-            </div>
-
-            {historyResult ? (
-              <div className="space-y-3 text-xs">
-                <div className="bg-indigo-50 p-3 rounded-xl">
-                  <p className="font-bold text-indigo-900">{historyResult.name} ({historyResult.patient_code})</p>
-                  <p className="text-slate-600">العمر: {historyResult.age} | الجندر: {historyResult.gender}</p>
-                  <p className="text-rose-700 font-semibold mt-1">تاريخ المرض والأمراض المزمنة: {historyResult.medical_history}</p>
-                </div>
-                <div className="bg-slate-50 p-3 rounded-xl space-y-2">
-                  <h4 className="font-bold text-slate-800">الكشوفات السابقة بالمنظومة:</h4>
-                  <p className="text-slate-600 bg-white p-2 rounded-lg border">
-                    تشخيص د. أحمد علي: ارتفاع بالضغط الشرياني واضطراب معدل ضربات القلب
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-rose-600 py-6 text-center">لم يتم العثور على مريض مطابق في السجل المشترك.</p>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Shared Patient Records (search by name / date range + full history) */}
+      <PatientRecordsModal
+        open={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        initialQuery={modalQuery}
+        onSelectPatient={openPatient}
+      />
     </div>
   );
 }

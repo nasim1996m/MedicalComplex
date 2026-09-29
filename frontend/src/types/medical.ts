@@ -34,6 +34,8 @@ export interface Patient {
   phone?: string;
   medical_history?: string;
   created_at?: string;
+  visit_count?: number;
+  last_visit_date?: string | null;
 }
 
 export interface Visit {
@@ -70,7 +72,7 @@ export interface LabRequest {
   age?: number;
   doctor_id: number;
   doctor_name?: string;
-  test_type_id: number;
+  test_type_id: number | null;
   test_name?: string;
   test_category?: string;
   test_price?: number;
@@ -95,7 +97,7 @@ export interface Medicine {
 export interface PrescriptionItem {
   id?: number;
   prescription_id?: number;
-  medicine_id: number;
+  medicine_id: number | null;
   medicine_name?: string;
   unit_price?: number;
   stock_qty?: number;
@@ -214,4 +216,12 @@ export interface SystemNotification {
   type: string;
   is_read: boolean;
   created_at: string;
+}
+
+// السجل الطبي المشترك كما يرجعه الباك إند: GET /patients/{id}/history
+export interface PatientHistory {
+  patient: Patient;
+  visits: Visit[];
+  lab_results: LabRequest[];
+  prescriptions: Prescription[];
 }

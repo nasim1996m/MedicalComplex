@@ -5,6 +5,7 @@ import { useGoogleLogin } from '@react-oauth/google';
 import { useAuth } from '@/context/AuthContext';
 import { Building2, Loader2, UserCheck, Shield } from 'lucide-react';
 import { mockData } from '@/services/api';
+import { apiErrorMessage, backendDownMessage } from '@/services/medicalApi';
 import { User, UserRole } from '@/types/medical';
 import axios from 'axios';
 
@@ -44,12 +45,18 @@ export default function LoginView() {
         throw new Error('لم يتم استلام بيانات المستخدم بشكل صحيح');
       }
     } catch (err: unknown) {
-      const message =
-        axios.isAxiosError(err) && err.response?.data?.message
-          ? err.response.data.message
-          : err instanceof Error
-          ? err.message
-          : 'حدث خطأ أثناء تسجيل الدخول';
+      let message = 'حدث خطأ أثناء تسجيل الدخول';
+      if (axios.isAxiosError(err)) {
+        if (!err.response) {
+          message = backendDownMessage();
+        } else {
+          const data = err.response.data;
+          // Laravel returns JSON; anything else means the request never reached Laravel
+          message = apiErrorMessage(err.response.status, data && typeof data === 'object' ? data : null);
+        }
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       setError(message);
     } finally {
       setLoading(false);
