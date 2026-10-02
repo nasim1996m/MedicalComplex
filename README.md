@@ -58,21 +58,28 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
 
+## النشر على Railway (الموصى به)
+
+Railway يبني المشروع تلقائياً بـ Railpack، فيكتشف Laravel ويشغّله على FrankenPHP. الإعدادات موجودة في `railway.json`.
+
+1. في Railway اضغط **New Project ← Deploy from GitHub repo** واختر **MedicalComplex**.
+2. أضف المتغيرات من تبويب **Variables**:
+   - `APP_KEY`: ولّده بالأمر `php artisan key:generate --show`.
+   - `APP_URL`: رابط الموقع على Railway.
+   - `APP_ENV=production` و`APP_DEBUG=false` و`LOG_CHANNEL=stderr` و`SESSION_SECURE_COOKIE=true`.
+   - `DB_CONNECTION=pgsql`، ومعه `DB_HOST` و`DB_PORT` و`DB_DATABASE` و`DB_USERNAME` و`DB_PASSWORD`، من Supabase أو من قاعدة Postgres تضيفها داخل Railway.
+   - `SEED_ADMIN_EMAIL` و`SEED_ADMIN_PASSWORD` (12 حرفاً على الأقل): ينشئان حساب الأدمن الأول في أول نشر.
+3. من **Settings ← Networking** اضغط **Generate Domain** للحصول على رابط عام.
+
+مع كل نشر، يشغّل `railway.json` الأوامر التالية قبل تشغيل الموقع:
+- `migrate`: ينشئ الجداول ويحدّثها.
+- `db:seed`: ينشئ حساب الأدمن مرة واحدة، ويتخطى ذلك إذا كانت البيانات موجودة.
+
+`/up` يُستخدم لفحص سلامة الموقع.
+
 ## النشر على Vercel
 
-يعمل المشروع على Vercel عبر `vercel-php` (PHP 8.5). الإعدادات موجودة في `vercel.json` و`api/index.php`.
-
-1. استورد المستودع في Vercel، ولا تغيّر Framework Preset (اتركه **Other**).
-2. أضف في **Environment Variables**:
-   - `APP_KEY`: ولّده بالأمر `php artisan key:generate --show`.
-   - `APP_URL`: رابط الموقع على Vercel.
-   - `DB_CONNECTION=pgsql` ومعه `DB_HOST` و`DB_PORT` و`DB_DATABASE` و`DB_USERNAME` و`DB_PASSWORD`، من قاعدة PostgreSQL خارجية مثل Supabase.
-   - `GOOGLE_CLIENT_ID` إذا كنت تستخدم الدخول بـ Google.
-   - `CORS_ALLOWED_ORIGINS`: رابط الواجهة الأمامية (React) إذا كانت تستدعي الـ API.
-3. أنشئ الجداول وحساب الأدمن الأول مرة واحدة من جهازك، بنفس بيانات قاعدة البيانات:
-   ```bash
-   SEED_ADMIN_EMAIL=you@example.com SEED_ADMIN_PASSWORD='كلمة-مرور-قوية-12-حرف' php artisan migrate --force --seed
-   ```
+ملفات `vercel.json` و`api/index.php` موجودة، لكن إضافة `vercel-php` معطلة حالياً على خوادم Vercel بسبب خلل لم يُصلح بعد ([vercel-community/php#650](https://github.com/vercel-community/php/issues/650)). استخدم Railway إلى أن يُصلح.
 
 ## الحماية والصلاحيات
 
