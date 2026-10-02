@@ -60,7 +60,7 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 
 ## النشر على Vercel
 
-يعمل المشروع على Vercel عبر `vercel-php` (PHP 8.3). الإعدادات موجودة في `vercel.json` و`api/index.php`.
+يعمل المشروع على Vercel عبر `vercel-php` (PHP 8.5). الإعدادات موجودة في `vercel.json` و`api/index.php`.
 
 1. استورد المستودع في Vercel، ولا تغيّر Framework Preset (اتركه **Other**).
 2. أضف في **Environment Variables**:
