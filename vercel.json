@@ -1,5 +1,6 @@
 {
   "framework": null,
+  "fluid": false,
   "buildCommand": "npm run build",
   "outputDirectory": "public",
   "functions": {
