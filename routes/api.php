@@ -9,57 +9,65 @@ use App\Http\Controllers\Api\LabController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\AccountantController;
 use App\Http\Controllers\Api\HrController;
-use App\Http\Controllers\Web\WebDashboardController;
 
 /*
 |--------------------------------------------------------------------------
 | Medical Complex API Routes v1
 |--------------------------------------------------------------------------
+| Every route except Google login requires a Sanctum bearer token, and each
+| group is limited to the roles that own it (admins can access everything).
 */
 
 Route::prefix('v1')->group(function () {
-    // Auth Routes
-    Route::post('/auth/google', [AuthController::class, 'googleLogin']);
-    Route::post('/auth/request-role', [AuthController::class, 'requestRole']);
+    // Public: exchange a verified Google token for an API token.
+    Route::post('/auth/google', [AuthController::class, 'googleLogin'])->middleware('throttle:10,1');
 
-    // Admin Routes
-    Route::get('/admin/stats', [AdminController::class, 'dashboardStats']);
-    Route::post('/admin/role-requests/{id}', [AdminController::class, 'approveRoleRequest']);
+    Route::middleware(['auth:sanctum', 'throttle:120,1'])->group(function () {
+        // Any signed-in user (including pending ones).
+        Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::post('/auth/logout', [AuthController::class, 'logout']);
+        Route::post('/auth/request-role', [AuthController::class, 'requestRole']);
 
-    // Doctor Routes
-    Route::get('/doctor/dashboard', [DoctorController::class, 'dashboard']);
-    Route::post('/doctor/visits', [DoctorController::class, 'createVisit']);
-    Route::post('/doctor/lab-requests', [DoctorController::class, 'requestLabTest']);
-    Route::post('/doctor/prescriptions', [DoctorController::class, 'sendPrescription']);
-    Route::get('/doctor/patients/{id}/history', [DoctorController::class, 'patientHistory']);
+        Route::middleware('role:admin')->group(function () {
+            Route::get('/admin/stats', [AdminController::class, 'dashboardStats']);
+            Route::post('/admin/role-requests/{id}', [AdminController::class, 'approveRoleRequest'])->whereNumber('id');
+            Route::get('/role-requests', [AuthController::class, 'listRoleRequests']);
+            Route::post('/role-requests/{id}/approve', [AuthController::class, 'approveRoleRequest'])->whereNumber('id');
+            Route::post('/role-requests/{id}/reject', [AuthController::class, 'rejectRoleRequest'])->whereNumber('id');
+        });
 
-    // Pharmacy Routes
-    Route::get('/pharmacy/dashboard', [PharmacyController::class, 'dashboard']);
-    Route::post('/pharmacy/prescriptions/{id}/dispense', [PharmacyController::class, 'dispense']);
+        Route::middleware('role:doctor')->group(function () {
+            Route::get('/doctor/dashboard', [DoctorController::class, 'dashboard']);
+            Route::post('/doctor/visits', [DoctorController::class, 'createVisit']);
+            Route::post('/doctor/lab-requests', [DoctorController::class, 'requestLabTest']);
+            Route::post('/doctor/prescriptions', [DoctorController::class, 'sendPrescription']);
+            Route::get('/doctor/patients/{id}/history', [DoctorController::class, 'patientHistory'])->whereNumber('id');
+        });
 
-    // Lab & Radiology Routes
-    Route::get('/lab/dashboard', [LabController::class, 'dashboard']);
-    Route::post('/lab/requests/{id}/complete', [LabController::class, 'completeTest']);
+        Route::middleware('role:pharmacist')->group(function () {
+            Route::get('/pharmacy/dashboard', [PharmacyController::class, 'dashboard']);
+            Route::post('/pharmacy/prescriptions/{id}/dispense', [PharmacyController::class, 'dispense'])->whereNumber('id');
+        });
 
-    // Inventory Routes
-    Route::get('/inventory/dashboard', [InventoryController::class, 'dashboard']);
-    Route::post('/inventory/restock', [InventoryController::class, 'restockItem']);
+        Route::middleware('role:lab_tech')->group(function () {
+            Route::get('/lab/dashboard', [LabController::class, 'dashboard']);
+            Route::post('/lab/requests/{id}/complete', [LabController::class, 'completeTest'])->whereNumber('id');
+        });
 
-    // Accountant Routes
-    Route::get('/accountant/dashboard', [AccountantController::class, 'dashboard']);
-    Route::post('/accountant/vouchers', [AccountantController::class, 'addVoucher']);
+        Route::middleware('role:storekeeper')->group(function () {
+            Route::get('/inventory/dashboard', [InventoryController::class, 'dashboard']);
+            Route::post('/inventory/restock', [InventoryController::class, 'restockItem']);
+        });
 
-    // HR Routes
-    Route::get('/hr/dashboard', [HrController::class, 'dashboard']);
-    Route::post('/hr/fingerprint', [HrController::class, 'recordFingerprint']);
-    Route::post('/hr/rosters', [HrController::class, 'addRoster']);
+        Route::middleware('role:accountant')->group(function () {
+            Route::get('/accountant/dashboard', [AccountantController::class, 'dashboard']);
+            Route::post('/accountant/vouchers', [AccountantController::class, 'addVoucher']);
+        });
 
-
-    // مسارات الأدمن (حسب نظام الحماية عندك)
-Route::get('/role-requests', [AuthController::class, 'listRoleRequests']);
-Route::post('/role-requests/{id}/approve', [AuthController::class, 'approveRoleRequest']);
-Route::post('/role-requests/{id}/reject', [AuthController::class, 'rejectRoleRequest']);
-
-
-Route::get('/request-role', [WebDashboardController::class, 'index'])->name('web.request_role');
+        Route::middleware('role:hr')->group(function () {
+            Route::get('/hr/dashboard', [HrController::class, 'dashboard']);
+            Route::post('/hr/fingerprint', [HrController::class, 'recordFingerprint']);
+            Route::post('/hr/rosters', [HrController::class, 'addRoster']);
+        });
+    });
 });

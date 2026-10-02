@@ -12,7 +12,7 @@ class DoctorController extends ApiController
      */
     public function dashboard(Request $request)
     {
-        $doctorId = $request->query('doctor_id');
+        $doctorId = $request->user()->isAdmin() ? $request->query('doctor_id') : $request->user()->id;
 
         $todayVisits = DB::table('visits')
             ->join('patients', 'visits.patient_id', '=', 'patients.id')
@@ -42,16 +42,16 @@ class DoctorController extends ApiController
     public function createVisit(Request $request)
     {
         $request->validate([
-            'doctor_id' => 'required|exists:users,id',
             'patient_id' => 'required|exists:patients,id',
-            'diagnosis' => 'required|string',
-            'notes' => 'nullable|string',
-            'fee' => 'nullable|numeric',
+            'diagnosis' => 'required|string|max:5000',
+            'notes' => 'nullable|string|max:5000',
+            'fee' => 'nullable|numeric|min:0|max:100000000',
         ]);
+        $doctorId = $request->user()->id;
 
         $visitId = DB::table('visits')->insertGetId([
             'patient_id' => $request->patient_id,
-            'doctor_id' => $request->doctor_id,
+            'doctor_id' => $doctorId,
             'visit_date' => today(),
             'diagnosis' => $request->diagnosis,
             'notes' => $request->notes,
@@ -62,13 +62,13 @@ class DoctorController extends ApiController
         ]);
 
         // Record income voucher for Accountant
-        $doctor = DB::table('users')->where('id', $request->doctor_id)->first();
+        $doctor = $request->user();
         DB::table('vouchers')->insert([
             'voucher_type' => 'income',
             'category' => 'doctor_income',
             'amount' => $request->fee ?? 25000,
             'description' => 'إيراد كشفية مريض من الطبيب: ' . ($doctor->name ?? 'طبيب'),
-            'created_by' => $request->doctor_id,
+            'created_by' => $doctorId,
             'status' => 'approved',
             'created_at' => now(),
             'updated_at' => now(),
@@ -85,14 +85,16 @@ class DoctorController extends ApiController
         $request->validate([
             'visit_id' => 'required|exists:visits,id',
             'patient_id' => 'required|exists:patients,id',
-            'doctor_id' => 'required|exists:users,id',
             'test_type_id' => 'required|exists:lab_test_types,id',
         ]);
+        if (!$this->visitMatches($request->visit_id, $request->patient_id)) {
+            return $this->error('الزيارة لا تخص هذا المريض', 422);
+        }
 
         $requestId = DB::table('lab_requests')->insertGetId([
             'visit_id' => $request->visit_id,
             'patient_id' => $request->patient_id,
-            'doctor_id' => $request->doctor_id,
+            'doctor_id' => $request->user()->id,
             'test_type_id' => $request->test_type_id,
             'status' => 'pending',
             'created_at' => now(),
@@ -121,17 +123,20 @@ class DoctorController extends ApiController
     {
         $request->validate([
             'visit_id' => 'required|exists:visits,id',
-            'doctor_id' => 'required|exists:users,id',
             'patient_id' => 'required|exists:patients,id',
-            'items' => 'required|array',
+            'items' => 'required|array|min:1|max:30',
             'items.*.medicine_id' => 'required|exists:medicines,id',
-            'items.*.dosage' => 'required|string',
-            'items.*.duration' => 'required|string',
+            'items.*.dosage' => 'required|string|max:200',
+            'items.*.duration' => 'required|string|max:100',
+            'items.*.notes' => 'nullable|string|max:500',
         ]);
+        if (!$this->visitMatches($request->visit_id, $request->patient_id)) {
+            return $this->error('الزيارة لا تخص هذا المريض', 422);
+        }
 
         $prescriptionId = DB::table('prescriptions')->insertGetId([
             'visit_id' => $request->visit_id,
-            'doctor_id' => $request->doctor_id,
+            'doctor_id' => $request->user()->id,
             'patient_id' => $request->patient_id,
             'status' => 'pending',
             'created_at' => now(),
@@ -210,5 +215,10 @@ class DoctorController extends ApiController
             'lab_results' => $labResults,
             'prescriptions' => $prescriptions,
         ]);
+    }
+
+    private function visitMatches($visitId, $patientId): bool
+    {
+        return DB::table('visits')->where('id', $visitId)->where('patient_id', $patientId)->exists();
     }
 }

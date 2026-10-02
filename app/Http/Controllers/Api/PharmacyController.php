@@ -45,29 +45,41 @@ class PharmacyController extends ApiController
      */
     public function dispense(Request $request, $id)
     {
-        $request->validate([
-            'pharmacist_id' => 'required|exists:users,id',
-        ]);
+        $pharmacistId = $request->user()->id;
 
-        $prescription = DB::table('prescriptions')->where('id', $id)->first();
-        if (!$prescription) {
+        if (!DB::table('prescriptions')->where('id', $id)->exists()) {
             return $this->error('الوصفة الطبية غير موجودة', 404);
         }
 
-        $items = DB::table('prescription_items')->where('prescription_id', $id)->get();
-        $totalPrice = 0;
+        return DB::transaction(function () use ($id, $pharmacistId) {
+            // Claim the prescription first: a second (or concurrent) dispense finds nothing to claim.
+            $claimed = DB::table('prescriptions')->where('id', $id)->where('status', 'pending')->update([
+                'status' => 'dispensed',
+                'dispensed_at' => now(),
+                'dispensed_by' => $pharmacistId,
+                'updated_at' => now(),
+            ]);
+            if (!$claimed) {
+                return $this->error('تم صرف هذه الوصفة مسبقاً', 409);
+            }
 
-        foreach ($items as $item) {
-            $med = DB::table('medicines')->where('id', $item->medicine_id)->first();
-            if ($med) {
+            $items = DB::table('prescription_items')->where('prescription_id', $id)->get();
+            $totalPrice = 0;
+
+            foreach ($items as $item) {
+                $med = DB::table('medicines')->where('id', $item->medicine_id)->lockForUpdate()->first();
+                if (!$med) {
+                    continue;
+                }
+                if ($med->quantity < 1) {
+                    // Roll back the whole dispense rather than selling stock that does not exist.
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(
+                        $this->error('الدواء (' . $med->name . ') نفد من المخزون', 409)
+                    );
+                }
                 $totalPrice += $med->unit_price;
-
-                // Deduct quantity
-                $newQty = max(0, $med->quantity - 1);
-                DB::table('medicines')->where('id', $med->id)->update([
-                    'quantity' => $newQty,
-                    'updated_at' => now(),
-                ]);
+                $newQty = $med->quantity - 1;
+                DB::table('medicines')->where('id', $med->id)->update(['quantity' => $newQty, 'updated_at' => now()]);
 
                 // Check 15% threshold trigger -> notify admin
                 if ($newQty <= $med->min_threshold) {
@@ -82,28 +94,20 @@ class PharmacyController extends ApiController
                     ]);
                 }
             }
-        }
 
-        // Mark as dispensed
-        DB::table('prescriptions')->where('id', $id)->update([
-            'status' => 'dispensed',
-            'dispensed_at' => now(),
-            'dispensed_by' => $request->pharmacist_id,
-            'updated_at' => now(),
-        ]);
+            // Record income in vouchers for Accountant
+            DB::table('vouchers')->insert([
+                'voucher_type' => 'income',
+                'category' => 'pharmacy_income',
+                'amount' => $totalPrice,
+                'description' => 'إيراد مبيعات صيدلية عن وصفة رقم #' . $id,
+                'created_by' => $pharmacistId,
+                'status' => 'approved',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
 
-        // Record income in vouchers for Accountant
-        DB::table('vouchers')->insert([
-            'voucher_type' => 'income',
-            'category' => 'pharmacy_income',
-            'amount' => $totalPrice,
-            'description' => 'إيراد مبيعات صيدلية عن وصفة رقم #' . $id,
-            'created_by' => $request->pharmacist_id,
-            'status' => 'approved',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        return $this->success(null, 'تم صرف الوصفة الطبية وتحديث المخزون وإبلاغ المحاسبة بنجاح.');
+            return $this->success(null, 'تم صرف الوصفة الطبية وتحديث المخزون وإبلاغ المحاسبة بنجاح.');
+        });
     }
 }

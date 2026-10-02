@@ -44,11 +44,10 @@ class AccountantController extends ApiController
     public function addVoucher(Request $request)
     {
         $request->validate([
-            'created_by' => 'required|exists:users,id',
             'voucher_type' => 'required|in:income,expense',
-            'category' => 'required|string', // water, electricity, telecom, cleaning, hospitality, salary, inventory_purchase, stationary, contracts
-            'amount' => 'required|numeric|min:0.01',
-            'description' => 'required|string',
+            'category' => 'required|string|max:50', // water, electricity, telecom, cleaning, hospitality, salary, inventory_purchase, stationary, contracts
+            'amount' => 'required|numeric|min:0.01|max:1000000000',
+            'description' => 'required|string|max:1000',
         ]);
 
         $voucherId = DB::table('vouchers')->insertGetId([
@@ -56,7 +55,7 @@ class AccountantController extends ApiController
             'category' => $request->category,
             'amount' => $request->amount,
             'description' => $request->description,
-            'created_by' => $request->created_by,
+            'created_by' => $request->user()->id,
             'status' => 'approved',
             'created_at' => now(),
             'updated_at' => now(),

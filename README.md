@@ -68,9 +68,20 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
    - `APP_URL`: رابط الموقع على Vercel.
    - `DB_CONNECTION=pgsql` ومعه `DB_HOST` و`DB_PORT` و`DB_DATABASE` و`DB_USERNAME` و`DB_PASSWORD`، من قاعدة PostgreSQL خارجية مثل Supabase.
    - `GOOGLE_CLIENT_ID` إذا كنت تستخدم الدخول بـ Google.
-3. أنشئ الجداول مرة واحدة من جهازك بنفس بيانات قاعدة البيانات:
+   - `CORS_ALLOWED_ORIGINS`: رابط الواجهة الأمامية (React) إذا كانت تستدعي الـ API.
+3. أنشئ الجداول وحساب الأدمن الأول مرة واحدة من جهازك، بنفس بيانات قاعدة البيانات:
    ```bash
-   php artisan migrate --force --seed
+   SEED_ADMIN_EMAIL=you@example.com SEED_ADMIN_PASSWORD='كلمة-مرور-قوية-12-حرف' php artisan migrate --force --seed
    ```
+
+## الحماية والصلاحيات
+
+- **الدخول:** بالبريد وكلمة المرور، أو بحساب Google بعد التحقق من التوكن على الخادم.
+- **الحسابات الجديدة:** تبقى "بانتظار الموافقة" ولا ترى أي لوحة حتى يوافق الأدمن. ولا يمكن لأحد أن يطلب دور الأدمن.
+- **الـ API:** كل المسارات تحتاج `Authorization: Bearer <token>`، باستثناء `POST /api/v1/auth/google`، وكل قسم محصور بدوره.
+  - يحصل تطبيق React على التوكن من `/api/v1/auth/google`.
+  - هوية المستخدم تؤخذ من التوكن، ولم يعد النظام يقبل `doctor_id` أو `created_by` من الطلب.
+- **حماية العمليات المالية:** لا يمكن صرف الوصفة أو إنجاز الفحص مرتين، فلا يتكرر الإيراد ولا ينقص المخزون خطأً.
+- **الاختبارات:** `php artisan test`.
 
 ملفات Vercel للقراءة فقط، لذلك الجلسات في الكوكيز والكاش في الذاكرة، وكل البيانات في قاعدة البيانات الخارجية.

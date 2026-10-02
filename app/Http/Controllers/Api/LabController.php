@@ -36,10 +36,11 @@ class LabController extends ApiController
     public function completeTest(Request $request, $id)
     {
         $request->validate([
-            'performed_by' => 'required|exists:users,id',
-            'result_summary' => 'required|string',
-            'report_file_url' => 'nullable|string',
+            'result_summary' => 'required|string|max:10000',
+            // Only real web links: a "javascript:" URL here would run in whoever opens the report.
+            'report_file_url' => 'nullable|url:https,http|max:2048',
         ]);
+        $performedBy = $request->user()->id;
 
         $labReq = DB::table('lab_requests')->where('id', $id)->first();
         if (!$labReq) {
@@ -48,13 +49,18 @@ class LabController extends ApiController
 
         $testType = DB::table('lab_test_types')->where('id', $labReq->test_type_id)->first();
 
-        DB::table('lab_requests')->where('id', $id)->update([
+        return DB::transaction(function () use ($request, $id, $testType, $performedBy) {
+        // Only a pending request can be completed, so the income is recorded once.
+        $updated = DB::table('lab_requests')->where('id', $id)->where('status', 'pending')->update([
             'status' => 'completed',
             'result_summary' => $request->result_summary,
-            'report_file_url' => $request->report_file_url ?? '/reports/sample_result.pdf',
-            'performed_by' => $request->performed_by,
+            'report_file_url' => $request->report_file_url,
+            'performed_by' => $performedBy,
             'updated_at' => now(),
         ]);
+        if (!$updated) {
+            return $this->error('تم إنجاز هذا الفحص مسبقاً', 409);
+        }
 
         // Record income voucher
         DB::table('vouchers')->insert([
@@ -62,12 +68,13 @@ class LabController extends ApiController
             'category' => 'lab_income',
             'amount' => $testType->price ?? 15000,
             'description' => 'إيراد فحص مختبر/أشعة (' . ($testType->name ?? 'فحص') . ')',
-            'created_by' => $request->performed_by,
+            'created_by' => $performedBy,
             'status' => 'approved',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
         return $this->success(null, 'تم حفظ نتيجة الفحص بنجاح وإتاحتها للطبيب والصيدلية.');
+        });
     }
 }
