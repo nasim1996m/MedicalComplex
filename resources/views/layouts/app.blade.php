@@ -28,10 +28,10 @@
                 </div>
             </div>
 
-            @if(Session::has('user'))
-            @php $u = Session::get('user'); $act = Session::get('active_role', $u->role); @endphp
+            @auth
+            @php $u = auth()->user(); @endphp
             <div class="flex items-center gap-4">
-                @if($u->role === 'admin')
+                @if($u->isAdmin())
                 <div class="relative group">
                     <button class="bg-indigo-900 text-sky-200 text-xs px-3.5 py-2 rounded-xl border border-indigo-500/30 flex items-center gap-1.5 font-bold">
                         <span>التحويل بين الداشبوردات (الادمن)</span>
@@ -50,21 +50,24 @@
                 @endif
 
                 <div class="flex items-center gap-2">
-                    <img src="{{ $u->avatar ?? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde' }}" class="w-9 h-9 rounded-full ring-2 ring-sky-400" />
+                    <img src="{{ $u->avatar ?? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde' }}" referrerpolicy="no-referrer" class="w-9 h-9 rounded-full ring-2 ring-sky-400" />
                     <div class="hidden md:block text-right text-white">
                         <p class="text-xs font-bold">{{ $u->name }}</p>
                         <p class="text-[10px] text-indigo-300">{{ $u->email }}</p>
                     </div>
-                    <a href="{{ route('web.logout') }}" class="text-xs text-rose-300 hover:text-rose-100 bg-rose-950/60 px-3 py-1.5 rounded-xl border border-rose-800/40 mr-2 font-bold">خروج</a>
+                    <form method="POST" action="{{ route('web.logout') }}" class="inline">
+                        @csrf
+                        <button type="submit" class="text-xs text-rose-300 hover:text-rose-100 bg-rose-950/60 px-3 py-1.5 rounded-xl border border-rose-800/40 mr-2 font-bold">خروج</button>
+                    </form>
                 </div>
             </div>
-            @endif
+            @endauth
         </div>
     </header>
 
     <!-- Main Content Body -->
     <div class="flex flex-1">
-        @if(Session::has('user') && Session::get('user')->role !== 'pending')
+        @if(auth()->check() && auth()->user()->isAdmin())
         <aside class="w-64 bg-[#0f172a] text-white p-4 hidden md:flex flex-col justify-between border-l border-indigo-900/40">
             <div class="space-y-4">
                 <h3 class="text-xs font-bold text-indigo-400 px-2">لوحات التحكم بالنظام</h3>

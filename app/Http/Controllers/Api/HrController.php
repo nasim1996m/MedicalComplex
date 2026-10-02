@@ -42,7 +42,7 @@ class HrController extends ApiController
     public function recordFingerprint(Request $request)
     {
         $request->validate([
-            'fingerprint_id' => 'required|string',
+            'fingerprint_id' => 'required|string|max:50',
             'action' => 'required|in:check_in,check_out',
         ]);
 
@@ -91,8 +91,8 @@ class HrController extends ApiController
             'employee_id' => 'required|exists:hr_employees,id',
             'shift' => 'required|in:morning,evening,night',
             'date' => 'required|date',
-            'location' => 'required|string',
-            'notes' => 'nullable|string',
+            'location' => 'required|string|max:150',
+            'notes' => 'nullable|string|max:1000',
         ]);
 
         $rosterId = DB::table('hr_rosters')->insertGetId([

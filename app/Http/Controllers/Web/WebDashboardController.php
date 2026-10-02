@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\User;
+use App\Support\Accounts;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Session;
+use Illuminate\Validation\Rule;
 
 class WebDashboardController extends Controller
 {
@@ -14,19 +16,21 @@ class WebDashboardController extends Controller
      */
     public function index(Request $request)
     {
-        $user = Session::get('user');
+        $user = $request->user();
 
-        if (!$user) {
-            $users = DB::table('users')->get();
-            return view('login', compact('users'));
-        }
-
-        if ($user->role === 'pending' || $user->status === 'pending') {
+        if (!$user->isApproved()) {
             return view('request-role', compact('user'));
         }
 
-        $activeRole = Session::get('active_role', $user->role);
-        $notifications = DB::table('notifications')->orderBy('created_at', 'desc')->get();
+        // Only the admin may view other departments' dashboards.
+        $activeRole = $user->isAdmin() ? $request->session()->get('active_role', 'admin') : $user->dashboardKey();
+        $notifications = DB::table('notifications')
+            ->where(function ($q) use ($user) {
+                $q->where('user_id', $user->id)->orWhere('target_role', $user->role);
+            })
+            ->orderBy('created_at', 'desc')
+            ->limit(50)
+            ->get();
 
         switch ($activeRole) {
             case 'admin':
@@ -37,7 +41,7 @@ class WebDashboardController extends Controller
                     ->select('role_requests.*', 'users.name as user_name', 'users.email as user_email', 'users.avatar as user_avatar')
                     ->where('role_requests.status', 'pending')
                     ->get();
-                $doctors = DB::table('users')->where('role', 'doctor')->get();
+                $doctors = DB::table('users')->where('role', 'doctor')->select('id', 'name', 'email', 'avatar', 'specialty', 'status')->get();
                 $totalIncome = DB::table('vouchers')->where('voucher_type', 'income')->sum('amount');
                 $totalExpense = DB::table('vouchers')->where('voucher_type', 'expense')->sum('amount');
                 return view('dashboards.admin', compact('user', 'activeRole', 'notifications', 'totalPatients', 'totalDoctors', 'pendingRequests', 'doctors', 'totalIncome', 'totalExpense'));
@@ -109,29 +113,20 @@ class WebDashboardController extends Controller
                 return view('dashboards.hr', compact('user', 'activeRole', 'notifications', 'employees', 'attendances', 'rosters'));
 
             default:
-                return redirect()->route('web.login');
+                abort(403);
         }
     }
 
     /**
-     * Switch User Session
-     */
-    public function loginAs(Request $request, $id)
-    {
-        $user = DB::table('users')->where('id', $id)->first();
-        if ($user) {
-            Session::put('user', $user);
-            Session::put('active_role', $user->role);
-        }
-        return redirect()->route('web.index');
-    }
-
-    /**
-     * Switch Active Role (Admin can switch to any dashboard)
+     * Switch the dashboard the admin is viewing.
      */
     public function switchRole(Request $request, $role)
     {
-        Session::put('active_role', $role);
+        if (!in_array($role, User::DASHBOARDS, true)) {
+            abort(404);
+        }
+        $request->session()->put('active_role', $role);
+
         return redirect()->route('web.index');
     }
 
@@ -140,116 +135,33 @@ class WebDashboardController extends Controller
      */
     public function submitRoleRequest(Request $request)
     {
-        $user = Session::get('user');
-        if (!$user) {
-            return redirect()->route('web.login');
+        $user = $request->user();
+        if ($user->isApproved()) {
+            return redirect()->route('web.index');
         }
 
-        $request->validate([
-            'requested_role'      => 'required|string',
-            'requested_specialty' => 'nullable|string',
-            'notes'               => 'nullable|string',
+        $data = $request->validate([
+            'requested_role'      => ['required', Rule::in(User::REQUESTABLE_ROLES)],
+            'requested_specialty' => 'nullable|string|max:150',
+            'notes'               => 'nullable|string|max:1000',
         ]);
 
-        $existing = DB::table('role_requests')
-            ->where('user_id', $user->id)
-            ->where('status', 'pending')
-            ->first();
-
-        if ($existing) {
-            DB::table('role_requests')->where('id', $existing->id)->update([
-                'requested_role'      => $request->requested_role,
-                'requested_specialty' => $request->requested_specialty,
-                'notes'               => $request->notes,
-                'updated_at'          => now(),
-            ]);
-        } else {
-            DB::table('role_requests')->insert([
-                'user_id'             => $user->id,
-                'requested_role'      => $request->requested_role,
-                'requested_specialty' => $request->requested_specialty,
-                'notes'               => $request->notes,
-                'status'              => 'pending',
-                'created_at'          => now(),
-                'updated_at'          => now(),
-            ]);
-        }
-
-        DB::table('notifications')->insert([
-            'user_id'     => null,
-            'target_role' => 'admin',
-            'title'       => 'طلب انضمام جديد',
-            'message'     => 'قدم ' . $user->name . ' (' . $user->email . ') طلب فتح داشبورد ' . $request->requested_role,
-            'type'        => 'role_request',
-            'is_read'     => 0,
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
+        Accounts::submitRoleRequest($user, $data['requested_role'], $data['requested_specialty'] ?? null, $data['notes'] ?? null);
 
         return redirect()->route('web.index')->with('success', 'تم تقديم طلبك بنجاح وهو قيد مراجعة الأدمن');
     }
 
-    /**
-     * Approve role request from Blade
-     */
     public function approveRoleRequest(Request $request, $id)
     {
-        $roleRequest = DB::table('role_requests')->where('id', $id)->first();
-        if ($roleRequest) {
-            DB::table('role_requests')->where('id', $id)->update([
-                'status'     => 'approved',
-                'updated_at' => now(),
-            ]);
+        $ok = Accounts::review((int) $id, $request->user(), true);
 
-            DB::table('users')->where('id', $roleRequest->user_id)->update([
-                'role'       => $roleRequest->requested_role,
-                'specialty'  => $roleRequest->requested_specialty,
-                'status'     => 'approved',
-                'updated_at' => now(),
-            ]);
-
-            DB::table('notifications')->insert([
-                'user_id'    => $roleRequest->user_id,
-                'title'      => 'تمت الموافقة على حسابك!',
-                'message'    => 'لقد وافق الأدمن على طلبك. يمكنك الآن استخدام حسابك.',
-                'type'       => 'role_approved',
-                'is_read'    => 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
-
-        return redirect()->route('web.index')->with('success', 'تمت الموافقة على الحساب وتفعيله بنجاح');
+        return redirect()->route('web.index')->with('success', $ok ? 'تمت الموافقة على الحساب وتفعيله بنجاح' : 'الطلب غير موجود أو تمت مراجعته مسبقاً');
     }
 
-    /**
-     * Reject role request from Blade
-     */
     public function rejectRoleRequest(Request $request, $id)
     {
-        $roleRequest = DB::table('role_requests')->where('id', $id)->first();
-        if ($roleRequest) {
-            DB::table('role_requests')->where('id', $id)->update([
-                'status'     => 'rejected',
-                'updated_at' => now(),
-            ]);
+        $ok = Accounts::review((int) $id, $request->user(), false);
 
-            DB::table('users')->where('id', $roleRequest->user_id)->update([
-                'status'     => 'rejected',
-                'updated_at' => now(),
-            ]);
-        }
-
-        return redirect()->route('web.index')->with('success', 'تم رفض الطلب');
-    }
-
-    /**
-     * Logout Session
-     */
-    public function logout()
-    {
-        Session::forget('user');
-        Session::forget('active_role');
-        return redirect()->route('web.index');
+        return redirect()->route('web.index')->with('success', $ok ? 'تم رفض الطلب' : 'الطلب غير موجود أو تمت مراجعته مسبقاً');
     }
 }

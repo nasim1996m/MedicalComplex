@@ -13,6 +13,18 @@
             </div>
         </div>
 
+        @if($user->status === 'rejected')
+        <div class="p-4 bg-rose-100 border border-rose-300 text-rose-800 rounded-2xl text-xs font-bold text-center">
+            تم رفض طلبك السابق. يمكنك تقديم طلب جديد.
+        </div>
+        @endif
+
+        @if($errors->any())
+        <div class="p-4 bg-rose-100 border border-rose-300 text-rose-800 rounded-2xl text-xs font-bold">
+            {{ $errors->first() }}
+        </div>
+        @endif
+
         @if(session('success'))
         <div class="p-4 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold text-center">
             {{ session('success') }}

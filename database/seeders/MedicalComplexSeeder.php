@@ -11,17 +11,27 @@ class MedicalComplexSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Users
+        if (DB::table('users')->exists()) {
+            $this->command?->warn('Database already seeded; skipping.');
+            return;
+        }
+
+        // 1. Users — the admin's credentials come from the environment, never from the code.
+        $adminEmail = strtolower(trim((string) env('SEED_ADMIN_EMAIL')));
+        $adminPassword = (string) env('SEED_ADMIN_PASSWORD');
+        if (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL) || strlen($adminPassword) < 12) {
+            throw new \RuntimeException('Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD (12+ characters) before seeding.');
+        }
+        // Demo staff accounts are only created when SEED_DEMO_PASSWORD is set (local testing).
+        $demoPassword = env('SEED_DEMO_PASSWORD') ? Hash::make(env('SEED_DEMO_PASSWORD')) : null;
+
         $adminId = DB::table('users')->insertGetId([
             'name' => 'مدير النظام (الادمن)',
-            'email' => 'admin@medical.com',
-            'google_id' => 'google_admin_101',
-            'avatar' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
-            'password' => Hash::make('password'),
+            'email' => $adminEmail,
+            'password' => Hash::make($adminPassword),
             'role' => 'admin',
             'specialty' => 'إدارة مجمع طبي',
             'status' => 'approved',
-            'phone' => '07700000001',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -29,9 +39,8 @@ class MedicalComplexSeeder extends Seeder
         $doctor1Id = DB::table('users')->insertGetId([
             'name' => 'د. أحمد علي السامرائي',
             'email' => 'doctor.ahmed@medical.com',
-            'google_id' => 'google_doc_102',
             'avatar' => 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=200',
-            'password' => Hash::make('password'),
+            'password' => $demoPassword,
             'role' => 'doctor',
             'specialty' => 'أطباء باطنية و غدد',
             'status' => 'approved',
@@ -43,9 +52,8 @@ class MedicalComplexSeeder extends Seeder
         $pharmacistId = DB::table('users')->insertGetId([
             'name' => 'د. سارة خالد (صيدلانية)',
             'email' => 'pharmacy@medical.com',
-            'google_id' => 'google_pharm_104',
             'avatar' => 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=200',
-            'password' => Hash::make('password'),
+            'password' => $demoPassword,
             'role' => 'pharmacist',
             'specialty' => 'صيدلة سريرية',
             'status' => 'approved',
@@ -57,9 +65,8 @@ class MedicalComplexSeeder extends Seeder
         $labTechId = DB::table('users')->insertGetId([
             'name' => 'أحمد العبيدي (فني مختبر وأشعة)',
             'email' => 'lab@medical.com',
-            'google_id' => 'google_lab_105',
             'avatar' => 'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&q=80&w=200',
-            'password' => Hash::make('password'),
+            'password' => $demoPassword,
             'role' => 'lab_tech',
             'specialty' => 'تحاليل وأشعة وتخطيط',
             'status' => 'approved',
@@ -71,9 +78,8 @@ class MedicalComplexSeeder extends Seeder
         $accountantId = DB::table('users')->insertGetId([
             'name' => 'مصطفى كامل (المحاسب)',
             'email' => 'accountant@medical.com',
-            'google_id' => 'google_acc_107',
             'avatar' => 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200',
-            'password' => Hash::make('password'),
+            'password' => $demoPassword,
             'role' => 'accountant',
             'specialty' => 'الحسابات والمالية',
             'status' => 'approved',

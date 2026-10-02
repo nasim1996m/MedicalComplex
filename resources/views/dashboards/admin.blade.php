@@ -1,6 +1,11 @@
 @extends('layouts.app')
 
 @section('content')
+@if(session('success'))
+<div class="mb-4 p-4 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold text-center">
+    {{ session('success') }}
+</div>
+@endif
 <div class="space-y-6 text-right">
     <!-- Top Stats Banner -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -53,8 +58,14 @@
                         <td class="p-3 text-slate-700">{{ $req->requested_specialty ?? '-' }}</td>
                         <td class="p-3"><span class="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">قيد الانتظار</span></td>
                         <td class="p-3 text-center space-x-1 space-x-reverse">
-                            <a href="{{ route('web.role_requests.approve', $req->id) }}" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1 rounded-lg text-xs">موافقة وتفعيل</a>
-                            <a href="{{ route('web.role_requests.reject', $req->id) }}" class="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded-lg text-xs">رفض</a>
+                            <form method="POST" action="{{ route('web.role_requests.approve', $req->id) }}" class="inline">
+                                @csrf
+                                <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1 rounded-lg text-xs">موافقة وتفعيل</button>
+                            </form>
+                            <form method="POST" action="{{ route('web.role_requests.reject', $req->id) }}" class="inline">
+                                @csrf
+                                <button type="submit" class="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded-lg text-xs">رفض</button>
+                            </form>
                         </td>
                     </tr>
                     @endforeach

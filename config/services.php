@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'google' => [
+        // OAuth client ID used to verify Google tokens (audience check).
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
+
 ];

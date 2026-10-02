@@ -34,25 +34,14 @@ class InventoryController extends ApiController
         $request->validate([
             'type' => 'required|in:medicine,inventory',
             'id' => 'required|integer',
-            'additional_quantity' => 'required|integer|min:1',
+            'additional_quantity' => 'required|integer|min:1|max:100000',
         ]);
 
-        if ($request->type === 'medicine') {
-            $item = DB::table('medicines')->where('id', $request->id)->first();
-            if ($item) {
-                DB::table('medicines')->where('id', $request->id)->update([
-                    'quantity' => $item->quantity + $request->additional_quantity,
-                    'updated_at' => now(),
-                ]);
-            }
-        } else {
-            $item = DB::table('inventory_items')->where('id', $request->id)->first();
-            if ($item) {
-                DB::table('inventory_items')->where('id', $request->id)->update([
-                    'quantity' => $item->quantity + $request->additional_quantity,
-                    'updated_at' => now(),
-                ]);
-            }
+        $table = $request->type === 'medicine' ? 'medicines' : 'inventory_items';
+        // Atomic increment so concurrent restocks never overwrite each other.
+        $updated = DB::table($table)->where('id', $request->id)->increment('quantity', (int) $request->additional_quantity, ['updated_at' => now()]);
+        if (!$updated) {
+            return $this->error('الصنف غير موجود', 404);
         }
 
         return $this->success(null, 'تم إضافة الكمية وتحديث المخزون بنجاح.');

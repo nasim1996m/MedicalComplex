@@ -2,48 +2,66 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
+    /** Roles a user may request; "admin" is never self-assignable. */
+    public const REQUESTABLE_ROLES = ['doctor', 'pharmacist', 'lab_tech', 'storekeeper', 'accountant', 'hr'];
+
+    /** Role => dashboard key used by the web portal. */
+    public const DASHBOARDS = [
+        'admin' => 'admin',
+        'doctor' => 'doctor',
+        'pharmacist' => 'pharmacy',
+        'lab_tech' => 'lab_tech',
+        'storekeeper' => 'storekeeper',
+        'accountant' => 'accountant',
+        'hr' => 'hr',
+    ];
+
     protected $fillable = [
         'name',
         'email',
         'password',
+        'google_id',
+        'avatar',
+        'phone',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
+        'google_id',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    public function isApproved(): bool
+    {
+        return $this->status === 'approved' && $this->role !== 'pending';
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->isApproved() && $this->role === 'admin';
+    }
+
+    public function dashboardKey(): ?string
+    {
+        return self::DASHBOARDS[$this->role] ?? null;
     }
 }
